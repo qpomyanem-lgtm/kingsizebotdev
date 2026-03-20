@@ -1,0 +1,468 @@
+import { useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { formatMoscowDate } from '../lib/time';
+import { Clock, PhoneCall, Check, X, Eye, Users, UserCheck, UserX, AlertCircle } from 'lucide-react';
+import { cn } from '../lib/utils';
+
+export interface Application {
+    id: string;
+    discordId: string;
+    discordUsername: string;
+    discordAvatarUrl: string | null;
+    field1: string;
+    field2: string;
+    field3: string;
+    field4: string;
+    field5: string;
+    status: 'pending' | 'interview' | 'interview_ready' | 'accepted' | 'rejected' | 'excluded' | 'blacklist';
+    createdAt: string;
+    handledByAdminUsername: string | null;
+    updatedAt: string;
+}
+
+export function Applications() {
+    const [filter, setFilter] = useState<'all' | 'pending' | 'interview'>('pending');
+    const [selectedApp, setSelectedApp] = useState<Application | null>(null);
+    const queryClient = useQueryClient();
+
+    // Modals state
+    const [acceptAppId, setAcceptAppId] = useState<string | null>(null);
+    const [nick, setNick] = useState('');
+    const [staticId, setStaticId] = useState('');
+    const [nickError, setNickError] = useState('');
+    const [staticError, setStaticError] = useState('');
+
+    const [rejectAppId, setRejectAppId] = useState<string | null>(null);
+    const [rejectReason, setRejectReason] = useState('');
+
+    const { data: applications, isLoading } = useQuery<Application[]>({
+        queryKey: ['applications'],
+        queryFn: async () => {
+            const { data } = await api.get('/api/applications');
+            return data;
+        }
+    });
+
+    const { data: fieldLabels } = useQuery<{ key: string, label: string }[]>({
+        queryKey: ['application-fields'],
+        queryFn: async () => {
+            const { data } = await api.get('/api/applications/fields');
+            return data;
+        }
+    });
+
+    const updateStatusMutation = useMutation({
+        mutationFn: async ({ id, status, gameNickname, gameStaticId, rejectionReason }: {
+            id: string,
+            status: string,
+            gameNickname?: string,
+            gameStaticId?: string,
+            rejectionReason?: string
+        }) => {
+            const payload: any = { status };
+            if (gameNickname) payload.gameNickname = gameNickname;
+            if (gameStaticId) payload.gameStaticId = gameStaticId;
+            if (rejectionReason) payload.rejectionReason = rejectionReason;
+
+            const { data } = await api.patch(`/api/applications/${id}/status`, payload);
+            return data;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['applications'] });
+            closeModals();
+        },
+        onError: (error: any) => {
+            const apiError = error?.response?.data;
+            if (apiError && apiError.details) {
+                alert(`Ошибка: ${apiError.error}\n${JSON.stringify(apiError.details, null, 2)}`);
+            } else {
+                alert(`Ошибка сохранения: ${error?.message || 'Неизвестная ошибка'}`);
+            }
+        }
+    });
+
+    const closeModals = () => {
+        setAcceptAppId(null);
+        setNick('');
+        setStaticId('');
+        setNickError('');
+        setStaticError('');
+
+        setRejectAppId(null);
+        setRejectReason('');
+    };
+
+    const formatNick = (value: string) => {
+        // Only English letters and spaces
+        const filtered = value.replace(/[^a-zA-Z ]/g, '');
+        // Capitalize first letter
+        return filtered.charAt(0).toUpperCase() + filtered.slice(1);
+    };
+
+    const handleAcceptSubmit = () => {
+        let valid = true;
+        if (!nick || nick.length > 22) {
+            setNickError('Никнейм обязателен и не больше 22 символов');
+            valid = false;
+        } else if (!/^[A-Z]/.test(nick)) {
+            setNickError('Никнейм должен начинаться с большой буквы');
+            valid = false;
+        } else {
+            setNickError('');
+        }
+
+        if (!staticId || !/^\d{1,6}$/.test(staticId)) {
+            setStaticError('Статик обязателен (только цифры, до 6 символов)');
+            valid = false;
+        } else {
+            setStaticError('');
+        }
+
+        if (valid && acceptAppId) {
+            updateStatusMutation.mutate({
+                id: acceptAppId,
+                status: 'accepted',
+                gameNickname: nick,
+                gameStaticId: staticId
+            });
+        }
+    };
+
+    const handleRejectSubmit = () => {
+        if (!rejectReason.trim()) return;
+        if (rejectAppId) {
+            updateStatusMutation.mutate({
+                id: rejectAppId,
+                status: 'rejected',
+                rejectionReason: rejectReason
+            });
+        }
+    };
+
+    const filteredApps = applications?.filter(app => {
+        if (filter === 'all') return ['pending', 'interview', 'interview_ready'].includes(app.status as any);
+        if (filter === 'interview') return ['interview', 'interview_ready'].includes(app.status as any);
+        return app.status === filter;
+    }) || [];
+
+    const getStatusBadge = (status: string) => {
+        switch (status) {
+            case 'pending': return <span className="px-2.5 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-medium">Ожидание</span>;
+            case 'interview': return <span className="px-2.5 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">Обзвон</span>;
+            case 'interview_ready': return <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-medium">Готов к обзвону</span>;
+            default: return <span className="px-2.5 py-1 bg-slate-100 text-slate-800 rounded-full text-xs font-medium">{status}</span>;
+        }
+    };
+
+    const renderTextWithLinks = (text: string | null | undefined) => {
+        if (!text) return <span className="text-slate-400 italic">Нет ответа</span>;
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        const parts = text.split(urlRegex);
+        return parts.map((part, i) => {
+            if (part.match(urlRegex)) {
+                return (
+                    <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:text-indigo-600 underline font-medium" onClick={(e) => e.stopPropagation()}>
+                        {part}
+                    </a>
+                );
+            }
+            return part;
+        });
+    };
+
+    return (
+        <div className="h-full flex flex-col font-sans relative">
+            <header className="mb-8 flex justify-between items-end">
+                <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center shadow-lg shadow-slate-900/20 text-white">
+                        <Users className="w-6 h-6" />
+                    </div>
+                    <div>
+                        <h1 className="text-[28px] font-black tracking-tight text-slate-900 mb-1">ЗАЯВКИ</h1>
+                        <p className="text-slate-500 text-[14px] font-medium tracking-wide">
+                            Управление заявками на вступление в семью.
+                        </p>
+                    </div>
+                </div>
+                <div className="flex gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/60 shadow-inner">
+                    <button
+                        onClick={() => setFilter('all')}
+                        className={cn("px-5 py-2 rounded-xl text-[13px] font-bold transition-all duration-300", filter === 'all' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                    >
+                        Все заявки
+                    </button>
+                    <button
+                        onClick={() => setFilter('pending')}
+                        className={cn("px-5 py-2 rounded-xl text-[13px] font-bold transition-all duration-300", filter === 'pending' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                    >
+                        Ожидают
+                    </button>
+                    <button
+                        onClick={() => setFilter('interview')}
+                        className={cn("px-5 py-2 rounded-xl text-[13px] font-bold transition-all duration-300", filter === 'interview' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                    >
+                        На обзвоне
+                    </button>
+                </div>
+            </header>
+
+            <div className="flex-1 bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden flex flex-col">
+                {isLoading ? (
+                    <div className="flex-1 flex items-center justify-center">
+                        <div className="w-8 h-8 rounded-full border-4 border-slate-900 border-t-transparent animate-spin"></div>
+                    </div>
+                ) : filteredApps.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
+                        <Users className="w-12 h-12 mb-3 text-slate-200" />
+                        <p className="text-[14px] font-medium">В этой категории пока нет заявок</p>
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto custom-scrollbar flex-1">
+                        <table className="w-full text-left border-collapse">
+                            <thead>
+                                <tr className="border-b border-slate-100 bg-slate-50/50">
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-[280px]">Пользователь</th>
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-[25%] text-center">Статус</th>
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-[25%] text-center">Время</th>
+                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Управление</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {filteredApps.map(app => (
+                                    <tr key={app.id} className="hover:bg-slate-50/30 transition-colors group">
+                                        <td className="px-4 py-2.5">
+                                            <div className="flex items-center gap-3">
+                                                <img
+                                                    src={app.discordAvatarUrl || `https://ui-avatars.com/api/?name=${app.discordUsername}&background=random`}
+                                                    alt={app.discordUsername}
+                                                    className="w-9 h-9 rounded-full ring-2 ring-white shadow-sm"
+                                                />
+                                                <div>
+                                                    <p className="text-[13px] font-bold text-slate-900">{app.discordUsername}</p>
+                                                    <p className="text-[11px] text-slate-500 font-mono mt-0.5">{app.discordId}</p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-2.5">
+                                            <div className="flex justify-center">
+                                                {getStatusBadge(app.status)}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-2.5">
+                                            <div className="flex flex-col items-center justify-center">
+                                                <div className="flex items-center gap-1.5 text-[12px] font-medium text-slate-600">
+                                                    <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                                    {formatMoscowDate(app.createdAt)}
+                                                </div>
+                                                {(app.status === 'interview' || app.status === 'interview_ready') && app.handledByAdminUsername && (
+                                                    <div className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[160px] text-center" title={app.handledByAdminUsername}>
+                                                        Решает: <span className="font-semibold text-slate-600">{app.handledByAdminUsername}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-2.5 text-right">
+                                            <div className="flex justify-end gap-1 text-[12px]">
+                                                <button
+                                                    onClick={() => setSelectedApp(app)}
+                                                    className="w-8 h-8 flex items-center justify-center text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-all shadow-sm active:scale-[0.98]"
+                                                    title="Посмотреть заявку"
+                                                >
+                                                    <Eye className="w-4 h-4" />
+                                                </button>
+                                                {app.status === 'pending' && (
+                                                    <>
+                                                        <button
+                                                            disabled={updateStatusMutation.isPending}
+                                                            onClick={() => updateStatusMutation.mutate({ id: app.id, status: 'interview' })}
+                                                            className="flex items-center gap-1.5 px-3 h-8 text-blue-600 bg-blue-50/50 hover:bg-blue-100 rounded-lg transition-all shadow-sm active:scale-[0.98] font-semibold border border-blue-100"
+                                                        >
+                                                            <PhoneCall className="w-3.5 h-3.5" /> Обзвон
+                                                        </button>
+                                                        <button
+                                                            disabled={updateStatusMutation.isPending}
+                                                            onClick={() => setRejectAppId(app.id)}
+                                                            className="w-8 h-8 flex items-center justify-center text-rose-600 bg-rose-50/50 hover:bg-rose-100 rounded-lg transition-all shadow-sm active:scale-[0.98] border border-rose-100"
+                                                            title="Отклонить"
+                                                        >
+                                                            <X className="w-4 h-4" />
+                                                        </button>
+                                                    </>
+                                                )}
+                                                {(app.status === 'interview' || app.status === 'interview_ready') && (
+                                                    <>
+                                                        <button
+                                                            disabled={updateStatusMutation.isPending}
+                                                            onClick={() => setAcceptAppId(app.id)}
+                                                            className="flex items-center gap-1.5 px-3 h-8 text-emerald-600 bg-emerald-50/50 hover:bg-emerald-100 rounded-lg transition-all shadow-sm active:scale-[0.98] font-semibold border border-emerald-100"
+                                                        >
+                                                            <Check className="w-3.5 h-3.5" /> Принять
+                                                        </button>
+                                                        <button
+                                                            disabled={updateStatusMutation.isPending}
+                                                            onClick={() => setRejectAppId(app.id)}
+                                                            className="w-8 h-8 flex items-center justify-center text-rose-600 bg-rose-50/50 hover:bg-rose-100 rounded-lg transition-all shadow-sm active:scale-[0.98] border border-rose-100"
+                                                            title="Отклонить"
+                                                        >
+                                                            <X className="w-4 h-4" />
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
+            {/* Application Details Modal */}
+            {selectedApp && createPortal(
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300"
+                    onClick={() => setSelectedApp(null)}
+                >
+                    <div
+                        className="bg-white rounded-3xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col animate-in slide-in-from-bottom-8 fade-in duration-300 border border-slate-100/50"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="px-6 py-5 border-b border-slate-100/80 flex justify-between items-center bg-slate-50/50 rounded-t-3xl">
+                            <div>
+                                <h2 className="text-[18px] font-bold text-slate-900 tracking-tight">Заявка от <span className="text-indigo-600">{selectedApp.discordUsername}</span></h2>
+                                <p className="text-[12px] text-slate-500 font-medium mt-0.5">Детали анкеты пользователя</p>
+                            </div>
+                        </div>
+                        <div className="p-6 overflow-y-auto custom-scrollbar flex-1 space-y-5">
+                            {[1, 2, 3, 4, 5].map(num => (
+                                <div key={num} className="group">
+                                    <h3 className="text-[13px] font-semibold text-slate-800 mb-1.5 flex items-center gap-2">
+                                        <div className="w-5 h-5 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center text-[10px] font-bold">
+                                            {num}
+                                        </div>
+                                        {fieldLabels?.[num - 1]?.label || `Вопрос ${num}`}
+                                    </h3>
+                                    <p className="text-[13px] text-slate-600 bg-slate-50/80 hover:bg-slate-50 border border-slate-100 p-3.5 rounded-2xl whitespace-pre-wrap break-words leading-relaxed transition-colors">
+                                        {renderTextWithLinks((selectedApp as any)?.[`field${num}`])}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
+
+            {/* Accept Modal */}
+            {acceptAppId && createPortal(
+                <div 
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300"
+                    onClick={closeModals}
+                >
+                    <div 
+                        className="bg-white rounded-3xl shadow-2xl w-full max-w-sm animate-in zoom-in-95 fade-in duration-300 border border-slate-100/50 overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="pt-8 px-6 pb-2 flex flex-col items-center text-center">
+                            <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4 ring-4 ring-emerald-50">
+                                <UserCheck className="w-7 h-7" />
+                            </div>
+                            <h2 className="text-[20px] font-bold text-slate-900 tracking-tight mb-1">Принять участника</h2>
+                            <p className="text-[13px] text-slate-500 font-medium px-4">Заполните игровые данные для автоматической выдачи роли</p>
+                        </div>
+                        <div className="px-6 py-4 space-y-4">
+                            <div>
+                                <label className="block text-[12px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider text-center">Игровой никнейм</label>
+                                <input 
+                                    type="text" 
+                                    value={nick}
+                                    onChange={e => setNick(formatNick(e.target.value))}
+                                    placeholder="Например: John Cena"
+                                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 text-[14px] font-bold text-slate-900 rounded-2xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-center tracking-wide placeholder:font-medium placeholder:tracking-normal placeholder:text-slate-400"
+                                />
+                                {nickError && <p className="text-rose-500 text-[11px] font-semibold mt-1.5 flex items-center justify-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{nickError}</p>}
+                            </div>
+                            <div>
+                                <label className="block text-[12px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider text-center">Статик ID</label>
+                                <input 
+                                    type="text" 
+                                    value={staticId}
+                                    onChange={e => setStaticId(e.target.value.replace(/\D/g, ''))}
+                                    placeholder="123456"
+                                    maxLength={6}
+                                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 text-[14px] font-bold text-slate-900 rounded-2xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-center tracking-[0.2em] placeholder:font-medium placeholder:tracking-normal placeholder:text-slate-400"
+                                />
+                                {staticError && <p className="text-rose-500 text-[11px] font-semibold mt-1.5 flex items-center justify-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{staticError}</p>}
+                            </div>
+                        </div>
+                        <div className="px-6 pb-6 pt-2 flex gap-3">
+                            <button 
+                                onClick={closeModals}
+                                className="flex-1 py-3 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-2xl text-[13px] font-bold transition-all active:scale-[0.98]"
+                            >
+                                Отмена
+                            </button>
+                            <button 
+                                onClick={handleAcceptSubmit}
+                                disabled={updateStatusMutation.isPending}
+                                className="flex-1 py-3 bg-emerald-500 text-white hover:bg-emerald-600 rounded-2xl text-[13px] font-bold transition-all shadow-lg shadow-emerald-500/30 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
+                            >
+                                Подтвердить
+                            </button>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
+
+            {/* Reject Modal */}
+            {rejectAppId && createPortal(
+                <div 
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300"
+                    onClick={closeModals}
+                >
+                    <div 
+                        className="bg-white rounded-3xl shadow-2xl w-full max-w-sm animate-in zoom-in-95 fade-in duration-300 border border-slate-100/50 overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="pt-8 px-6 pb-2 flex flex-col items-center text-center">
+                            <div className="w-14 h-14 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mb-4 ring-4 ring-rose-50">
+                                <UserX className="w-7 h-7" />
+                            </div>
+                            <h2 className="text-[20px] font-bold text-slate-900 tracking-tight mb-1">Отклонить заявку</h2>
+                            <p className="text-[13px] text-slate-500 font-medium px-4">Укажите причину отказа, она будет видна кандидату</p>
+                        </div>
+                        <div className="px-6 py-4">
+                            <textarea 
+                                value={rejectReason}
+                                onChange={e => setRejectReason(e.target.value)}
+                                placeholder="Например: Возраст / Некорректные ответы"
+                                rows={3}
+                                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 text-[13px] font-medium text-slate-900 rounded-2xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all placeholder:text-slate-400 resize-none text-center"
+                            />
+                        </div>
+                        <div className="px-6 pb-6 pt-2 flex gap-3">
+                            <button 
+                                onClick={closeModals}
+                                className="flex-1 py-3 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-2xl text-[13px] font-bold transition-all active:scale-[0.98]"
+                            >
+                                Отмена
+                            </button>
+                            <button 
+                                onClick={handleRejectSubmit}
+                                disabled={updateStatusMutation.isPending || !rejectReason.trim()}
+                                className="flex-1 py-3 bg-rose-500 text-white hover:bg-rose-600 rounded-2xl text-[13px] font-bold transition-all shadow-lg shadow-rose-500/30 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
+                            >
+                                Отклонить
+                            </button>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
+        </div>
+    );
+}

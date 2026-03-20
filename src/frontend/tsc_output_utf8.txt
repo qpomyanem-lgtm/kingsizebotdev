@@ -1,0 +1,2 @@
+﻿src/App.tsx(13,48): error TS2503: Cannot find namespace 'JSX'.
+src/lib/api.ts(1,19): error TS2307: Cannot find module 'axios' or its corresponding type declarations.

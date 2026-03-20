@@ -1,0 +1,13 @@
+/.agent
+/.agents
+/.env
+/.vscode
+/componentjs.md
+/node_modules
+/package-lock.json
+/skills-lock.json
+/dist
+/tmp
+/scripts
+/test_*.ts
+/test_*.js

@@ -1,0 +1,46 @@
+{
+  "name": "majestic-rp-family-bot",
+  "version": "1.0.0",
+  "description": "Discord Bot & Web Dashboard for Majestic RP Family",
+  "private": true,
+  "scripts": {
+    "dev:backend": "tsx watch src/backend/server.ts",
+    "dev:bot": "tsx watch src/bot/index.ts",
+    "dev:frontend": "cd src/frontend && npm run dev",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:bot\" \"npm run dev:frontend\"",
+    "build": "npm run build:frontend && tsc",
+    "build:frontend": "cd src/frontend && npm run build",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "studio": "drizzle-kit studio",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^9.4.0",
+    "@fastify/cors": "^9.0.1",
+    "@lucia-auth/adapter-drizzle": "^1.0.7",
+    "@types/uuid": "^10.0.0",
+    "arctic": "^3.7.0",
+    "axios": "^1.13.6",
+    "canvas": "^3.2.1",
+    "discord.js": "^14.15.2",
+    "dotenv": "^16.6.1",
+    "drizzle-orm": "^0.30.10",
+    "fastify": "^4.26.2",
+    "jimp": "^0.22.12",
+    "lucia": "^3.2.0",
+    "pg": "^8.11.5",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.8.3",
+    "uuid": "^13.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "@types/pg": "^8.11.6",
+    "concurrently": "^8.2.2",
+    "drizzle-kit": "^0.21.2",
+    "tsx": "^4.10.5",
+    "typescript": "^5.4.5"
+  }
+}
