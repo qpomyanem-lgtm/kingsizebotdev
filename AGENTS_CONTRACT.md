@@ -59,7 +59,7 @@
 
 ### Applications (prefix `/api/applications`)
 1. `GET /api/applications/`
-   - Auth: Lucia session (см. checkAdmin в `src/backend/routes/applications.ts`)
+   - Auth: Lucia session (см. checkAdmin в `src/backend/features/applications/controller.ts`)
    - Ответ: все приложения, order by `applications.createdAt` desc
 2. `PATCH /api/applications/:id/status`
    - Auth: Lucia session
@@ -184,7 +184,7 @@
 
 ## 2. WebSocket events (socket.io)
 
-Источник: `src/backend/server.ts` и эмиты из роутов `applications.ts` и `activity.ts`.
+Источник: `src/backend/server.ts` и эмиты из контроллеров `src/backend/features/applications/controller.ts` и `src/backend/features/activity/controller.ts`.
 
 1. `applications_refresh` : void
 2. `activity_refresh` : void
@@ -204,10 +204,10 @@
 3. `afk_end_btn`
    - handler: `handleAfkEndBtn` (`afkButton.ts`)
 4. `event_create_btn`
-   - handler: `handleEventCreateBtn` (`eventInteractions.ts`)
+   - handler: `handleEventCreateBtn` (`event/eventCreate.ts`, реэкспорт из `eventInteractions.ts`)
    - modal id: `event_create_modal` (raw RadioGroup)
 5. `event_*_<eventId>` (button)
-   - handlers: `handleEventActionBtn` (`eventInteractions.ts`)
+   - handlers: `handleEventActionBtn` (`event/eventActionButtons.ts`, реэкспорт из `eventInteractions.ts`)
    - action форматы:
      - `event_join_<eventId>`
      - `event_leave_<eventId>`
@@ -226,15 +226,15 @@
 2. `afk_start_modal`
    - handler: `handleAfkModalSubmit` (`afkModalSubmit.ts`)
 3. `event_create_modal`
-   - handler: `handleEventCreateModalSubmit` (`eventInteractions.ts`)
+   - handler: `handleEventCreateModalSubmit` (`event/eventCreate.ts`, реэкспорт из `eventInteractions.ts`)
    - raw components:
      - RadioGroup: `event_type_radio` values: `MCL|ВЗЗ|Capt`
      - TextInput: `timeInput`, `dateInput` (optional), `slotsInput`
 4. `event_setgroup_modal_<eventId>`
-   - handler: `handleEventSetGroupModalSubmit`
+   - handler: `handleEventSetGroupModalSubmit` (`event/eventSetGroupModalSubmit.ts`)
    - TextInput: `groupCodeInput`
 5. `event_map_modal_<eventId>`
-   - handler: `handleEventMapModalSubmit`
+   - handler: `handleEventMapModalSubmit` (`event/eventMapModalSubmit.ts`)
    - raw RadioGroup: `map_radio` values = `event_maps.id`
 
 ## 4. IPC endpoints (HTTP inside docker/host)
@@ -302,7 +302,7 @@
   - edits message `ONLINE_MESSAGE_ID`
   - fetch external API: `https://api.majestic-files.net/meta/servers?region=ru`
 
-### Event roster embed (`src/bot/events/interactions/eventInteractions.ts`)
+### Event roster embed (`src/bot/events/interactions/event/eventEmbedPayload.ts`, реэкспорт из `eventInteractions.ts`)
 - `refreshEventEmbed(message, eventId)`
   - edits original message `events.messageId`
   - отображает списки:
@@ -327,7 +327,45 @@
 - Screenshot sync:
   - posts into forum thread: embed title `Активность` with image url
 
-## 6. Важные `system_settings.key`
+## 6. Discord event handlers (бот, рантайм)
+
+Обработчики Discord-событий зарегистрированы в `src/bot/handlers/eventHandler.ts`.
+
+### `messageDelete`
+- Обнаруживает удаление управляемых embed-сообщений (TICKETS_MESSAGE_ID, AFK_MESSAGE_ID, EVENTS_MESSAGE_ID, ONLINE_MESSAGE_ID).
+- Сбрасывает соответствующий `system_settings` key в `null` для авто-переотправки.
+- Немедленно вызывает `checkAndDeployEmbeds(client)`.
+
+### `guildMemberUpdate`
+1. **Авто-отзыв сессий**: если у пользователя снята admin-роль и не осталось других admin-ролей — все `sessions` этого пользователя удаляются.
+2. **Авто-синхронизация состава семьи**:
+   - Если у пользователя есть KINGSIZE/NEWKINGSIZE — создаёт/обновляет `members` (role, tier, status).
+   - Если tier изменился — обновляет `event_participants.tier` в незакрытых мероприятиях и обновляет embed через IPC.
+   - При получении роли семьи впервые — создаёт activity thread через IPC.
+   - Если роль семьи утрачена — устанавливает `members.status = 'kicked'`, `tier = 'NONE'`.
+
+### `guildMemberAdd`
+- Если вступивший пользователь есть в `members` со `status = 'blacklisted'` — автоматически добавляет роль BLACKLIST.
+
+### `messageCreate` (DM)
+- Приоритет: сначала `handleActivityDmMessage` (загрузка скриншотов активности), потом обработка интервью-сообщений.
+- Интервью: находит активную заявку со статусом `interview|interview_ready`, сохраняет сообщение в `interview_messages`, уведомляет backend через IPC (`new_message`), ставит реакцию ✅.
+
+### `messageCreate` (guild threads)
+- Обрабатывает сообщения в тредах активности через `handleActivityForumMessage`.
+
+### Background intervals (`ClientReady`)
+- `checkExpiredAfks` — каждые **60s**, переводит просроченные AFK в `ended`
+- `refreshServerOnlineEmbed` — каждые **30s**, обновляет онлайн-статус серверов
+- `checkAndDeployEmbeds` — каждые **15s**, деплоит/обновляет панели
+- Reconcile activity threads — каждые **300s**, удаляет из БД threads, удалённые из Discord
+- Auto-refresh event embeds — каждые **30s**, обновляет embed при переходе Open → InProgress
+
+### Guild lock
+- При старте бот читает `GUILD_ID` из `system_settings` и покидает все серверы, не совпадающие с ним.
+- Все interaction из неавторизованных серверов игнорируются (DM разрешены).
+
+## 7. Важные `system_settings.key`
 
 Используются в рантайме (read/write):
 - `GUILD_ID` (Discord guild id)
@@ -340,12 +378,16 @@
 - `APPLICATION_FIELD_1_PLACEHOLDER..5_PLACEHOLDER`
 - `APPLICATION_FIELD_1_STYLE..5_STYLE`
 
-## 7. Где всё это живёт (для навигации)
+## 8. Где всё это живёт (для навигации)
 
-- REST API: `src/backend/server.ts`, `src/backend/routes/*.ts`
-- WebSocket emits: `src/backend/routes/applications.ts`, `src/backend/routes/activity.ts`
+- REST API: регистрация в `src/backend/server.ts`, routes-обёртки — `src/backend/routes/*.ts`, бизнес-логика — `src/backend/features/*/controller.ts`
+- WebSocket emits: `src/backend/features/applications/controller.ts`, `src/backend/features/activity/controller.ts`
 - Discord interaction routing: `src/bot/handlers/eventHandler.ts`
 - Panels/embeds deploy+refresh: `src/bot/lib/embedDeployer.ts`, `src/bot/lib/afkEmbed.ts`, `src/bot/lib/serverStatusEmbed.ts`
-- Interactions: `src/bot/events/interactions/*`
-- IPC: бот внутри `src/bot/index.ts`, backend IPC receive inside `src/backend/routes/applications.ts` and `src/backend/routes/activity.ts`
+- Embed builders: `src/bot/embeds/panels/`, `src/bot/embeds/afk/`, `src/bot/embeds/online/`
+- Event interactions (barrel): `src/bot/events/interactions/eventInteractions.ts` → реэкспортирует из `src/bot/events/interactions/event/` (`eventCreate.ts`, `eventActionButtons.ts`, `eventSetGroupModalSubmit.ts`, `eventMapModalSubmit.ts`, `eventEmbedPayload.ts`, `eventShared.ts`)
+- Activity interactions: `src/bot/events/interactions/activityInteractions.ts` (основной модуль); `src/bot/events/interactions/activity/` — вспомогательные файлы (WIP рефакторинг, пока не подключены)
+- Прочие interactions: `src/bot/events/interactions/ticketButton.ts`, `ticketModalSubmit.ts`, `afkButton.ts`, `afkModalSubmit.ts`, `interviewReady.ts`
+- IPC: бот внутри `src/bot/index.ts`, backend IPC receive — `src/backend/features/applications/controller.ts` и `src/backend/features/activity/controller.ts`
+- DB schema: `src/db/schema.ts`, seed: `src/db/seed.ts`
 

@@ -3,7 +3,7 @@
 Discord bot + web dashboard для управления семьёй Majestic RP.
 
 Основные модули:
-- `src/backend` — Fastify REST API + socket.io
+- `src/backend` — Fastify REST API + socket.io (routes — обёртки, бизнес-логика — `features/*/controller.ts`)
 - `src/bot` — discord.js bot (Components V2)
 - `src/frontend` — React SPA (Vite)
 - `src/db` — PostgreSQL + Drizzle ORM
@@ -19,8 +19,8 @@ Discord bot + web dashboard для управления семьёй Majestic RP
   - Discord interaction `customId` + соответствие handlers
   - IPC endpoints (backend <-> bot)
   - `system_settings.key`, используемые в рантайме
-  - embeds/panels, которые бот deploy’ит/обновляет
-
+  - embeds/panels, которые бот deploy’ит/обновляет  - Discord event handlers (messageDelete, guildMemberUpdate, guildMemberAdd, messageCreate)
+  - Background intervals (cron-задачи бота)
 `AGENTS_CONTRACT.md` — источник истины (source of truth). `README.md` — витрина: он описывает то же поведение людям, но при расхождениях ориентируйтесь на контракт.
 
 Если вы меняете код, но нужно сохранить поведение 1:1 — сначала обновляйте контракт, затем — код.
@@ -143,6 +143,23 @@ Discord bot + web dashboard для управления семьёй Majestic RP
 - Event roster embed (кнопки `event_*_<eventId>`)
 - Interview messages (DM + `interview_ready_<id>`)
 - Activity threads + DM-сессии (`activity_upload_<memberId>`)
+
+---
+
+## Discord event handlers (бот, рантайм)
+- `messageDelete` — авто-переотправка удалённых системных embed'ов
+- `guildMemberUpdate` — отзыв сессий при снятии admin-роли; авто-синхронизация состава семьи (KINGSIZE/NEWKINGSIZE/TIER)
+- `guildMemberAdd` — авто-восстановление роли BLACKLIST при повторном заходе
+- `messageCreate` (DM) — обработка скриншотов активности и сообщений интервью
+- `messageCreate` (guild threads) — обработка сообщений в тредах активности
+
+### Background intervals
+- `checkExpiredAfks` — каждые 60s
+- `refreshServerOnlineEmbed` — каждые 30s
+- `checkAndDeployEmbeds` — каждые 15s
+- Reconcile activity threads — каждые 300s
+- Auto-refresh event embeds — каждые 30s
+- Guild lock: бот покидает серверы, не совпадающие с `GUILD_ID`
 
 ---
 
@@ -515,6 +532,7 @@ CASCADE;
    - новый `customId`
    - новый IPC event/route
    - новые `system_settings.key`
+   - новый Discord event handler / background interval
    обновите контракт (и только потом код).
 3. Сохранение поведения 1:1 означает:
    - endpoint paths/methods не меняются
