@@ -5,15 +5,16 @@ import { v4 as uuidv4 } from 'uuid';
 import { eq } from 'drizzle-orm';
 
 export async function handleTicketApplyModal(interaction: ModalSubmitInteraction) {
+    // Acknowledge immediately to avoid interaction token expiry.
+    await interaction.deferReply({ ephemeral: true }).catch(() => {});
     const discordId = interaction.user.id;
 
     // Check if user is blacklisted
     try {
         const [member] = await db.select().from(members).where(eq(members.discordId, discordId));
         if (member && member.status === 'blacklisted') {
-            await interaction.reply({
+            await interaction.editReply({
                 content: '❌ Вы находитесь в черном списке и не можете подавать заявки.',
-                ephemeral: true
             });
             return;
         }
@@ -57,15 +58,13 @@ export async function handleTicketApplyModal(interaction: ModalSubmitInteraction
             dmStatusMsg = '(Не удалось отправить уведомление в ЛС, возможно они у вас закрыты)';
         }
 
-        await interaction.reply({
+        await interaction.editReply({
             content: `Ваша заявка успешно отправлена! ${dmStatusMsg}`,
-            ephemeral: true
         });
     } catch (error) {
         console.error('❌ Ошибка при сохранении заявки:', error);
-        await interaction.reply({
+        await interaction.editReply({
             content: 'Произошла ошибка при сохранении заявки. Пожалуйста, сообщите администрации.',
-            ephemeral: true
         });
     }
 }

@@ -2,6 +2,7 @@ import { ButtonInteraction, ActionRowBuilder, ModalBuilder, TextInputBuilder, Te
 import { db } from '../../../db';
 import { systemSettings } from '../../../db/schema';
 import { inArray } from 'drizzle-orm';
+import { showModalViaInteractionCallback } from '../../lib/interactionResponses';
 
 interface FieldConfig {
     label: string;
@@ -12,14 +13,34 @@ interface FieldConfig {
 /**
  * Reads field labels, placeholders, and styles from DB, falling back to defaults.
  */
+const DEFAULT_FIELD_CONFIGS: FieldConfig[] = [
+    { label: 'Вопрос 1', placeholder: '', style: 2 },
+    { label: 'Вопрос 2', placeholder: '', style: 2 },
+    { label: 'Вопрос 3', placeholder: '', style: 2 },
+    { label: 'Вопрос 4', placeholder: '', style: 2 },
+    { label: 'Вопрос 5', placeholder: '', style: 2 },
+];
+
+type CachedFieldConfigs = { value: FieldConfig[]; expiresAt: number };
+let cachedFieldConfigs: CachedFieldConfigs | null = null;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+    return new Promise((resolve) => {
+        const t = setTimeout(() => resolve(null), ms);
+        p.then(
+            (v) => {
+                clearTimeout(t);
+                resolve(v);
+            },
+            () => {
+                clearTimeout(t);
+                resolve(null);
+            }
+        );
+    });
+}
+
 async function getFieldConfigs(): Promise<FieldConfig[]> {
-    const defaults: FieldConfig[] = [
-        { label: 'Вопрос 1', placeholder: '', style: 2 },
-        { label: 'Вопрос 2', placeholder: '', style: 2 },
-        { label: 'Вопрос 3', placeholder: '', style: 2 },
-        { label: 'Вопрос 4', placeholder: '', style: 2 },
-        { label: 'Вопрос 5', placeholder: '', style: 2 },
-    ];
     try {
         const allKeys = [
             'APPLICATION_FIELD_1', 'APPLICATION_FIELD_2', 'APPLICATION_FIELD_3', 'APPLICATION_FIELD_4', 'APPLICATION_FIELD_5',
@@ -27,7 +48,7 @@ async function getFieldConfigs(): Promise<FieldConfig[]> {
             'APPLICATION_FIELD_1_STYLE', 'APPLICATION_FIELD_2_STYLE', 'APPLICATION_FIELD_3_STYLE', 'APPLICATION_FIELD_4_STYLE', 'APPLICATION_FIELD_5_STYLE'
         ];
         const rows = await db.select().from(systemSettings).where(inArray(systemSettings.key, allKeys));
-        return defaults.map((def, i) => {
+        return DEFAULT_FIELD_CONFIGS.map((def, i) => {
             const num = i + 1;
             const labelRow = rows.find(r => r.key === `APPLICATION_FIELD_${num}`);
             const placeholderRow = rows.find(r => r.key === `APPLICATION_FIELD_${num}_PLACEHOLDER`);
@@ -40,12 +61,24 @@ async function getFieldConfigs(): Promise<FieldConfig[]> {
             };
         });
     } catch {
-        return defaults;
+        return DEFAULT_FIELD_CONFIGS;
     }
 }
 
 export async function handleTicketApplyBtn(interaction: ButtonInteraction) {
-    const configs = await getFieldConfigs();
+    const now = Date.now();
+    const cached = cachedFieldConfigs && cachedFieldConfigs.expiresAt > now ? cachedFieldConfigs.value : null;
+    const configs = cached ?? DEFAULT_FIELD_CONFIGS;
+
+    // Refresh cache in background (best-effort). This won't affect the current modal.
+    if (!cachedFieldConfigs || cachedFieldConfigs.expiresAt <= now) {
+        void withTimeout(getFieldConfigs(), 3000)
+            .then((loaded) => {
+                if (!loaded) return;
+                cachedFieldConfigs = { value: loaded, expiresAt: Date.now() + 30_000 };
+            })
+            .catch(() => {});
+    }
 
     const modal = new ModalBuilder()
         .setCustomId('ticket_apply_modal')
@@ -68,5 +101,9 @@ export async function handleTicketApplyBtn(interaction: ButtonInteraction) {
     const rows = fields.map(field => new ActionRowBuilder<TextInputBuilder>().addComponents(field));
     modal.addComponents(...rows);
 
-    await interaction.showModal(modal);
+    try {
+        await showModalViaInteractionCallback(interaction, modal);
+    } catch (err) {
+        console.error('❌ Не удалось показать modal заявки (callback):', err);
+    }
 }

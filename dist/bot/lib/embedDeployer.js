@@ -11,7 +11,11 @@ const ticketsPanel_js_1 = require("../embeds/panels/ticketsPanel.js");
 const eventsPanel_js_1 = require("../embeds/panels/eventsPanel.js");
 const onlineStatusPanel_js_1 = require("../embeds/panels/onlineStatusPanel.js");
 const afkPanels_js_1 = require("../embeds/panels/afkPanels.js");
+let isDeployingEmbeds = false;
 async function checkAndDeployEmbeds(client) {
+    if (isDeployingEmbeds)
+        return;
+    isDeployingEmbeds = true;
     const configs = [
         {
             channelKey: 'TICKETS_CHANNEL_ID',
@@ -59,6 +63,9 @@ async function checkAndDeployEmbeds(client) {
     }
     catch (error) {
         console.error('❌ Ошибка в checkAndDeployEmbeds:', error);
+    }
+    finally {
+        isDeployingEmbeds = false;
     }
 }
 async function deployEmbed(client, channelId, config) {

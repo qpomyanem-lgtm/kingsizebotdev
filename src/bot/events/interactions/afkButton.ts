@@ -3,6 +3,7 @@ import { db } from '../../../db';
 import { afkEntries, roleSettings } from '../../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { refreshAfkEmbed } from '../../lib/afkEmbed';
+import { showModalViaInteractionCallback } from '../../lib/interactionResponses';
 
 export async function handleAfkStartBtn(interaction: ButtonInteraction) {
     // Check if user has at least one configured role
@@ -56,7 +57,7 @@ export async function handleAfkStartBtn(interaction: ButtonInteraction) {
         new ActionRowBuilder<TextInputBuilder>().addComponents(reasonField)
     );
 
-    await interaction.showModal(modal);
+    await showModalViaInteractionCallback(interaction, modal);
 }
 
 export async function handleAfkEndBtn(interaction: ButtonInteraction) {

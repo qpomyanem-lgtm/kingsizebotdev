@@ -6,13 +6,15 @@ const schema_1 = require("../../../db/schema");
 const afkEmbed_1 = require("../../lib/afkEmbed");
 const uuid_1 = require("uuid");
 async function handleAfkModalSubmit(interaction) {
+    // Acknowledge immediately to avoid interaction token expiry.
+    await interaction.deferReply({ ephemeral: true }).catch(() => { });
     const timeStr = interaction.fields.getTextInputValue('afk_time').trim();
     const reason = interaction.fields.getTextInputValue('afk_reason').trim();
     // Extract HH:MM from anywhere in the string
     const timeRegex = /([01]?\d|2[0-3])[\s:-]*([0-5]\d)/;
     const match = timeStr.match(timeRegex);
     if (!match) {
-        return interaction.reply({ content: '❌ Не удалось определить время. Пожалуйста, укажите ЧАСЫ МИНУТЫ (например, "до 14 30").', ephemeral: true });
+        return interaction.editReply({ content: '❌ Не удалось определить время. Пожалуйста, укажите ЧАСЫ МИНУТЫ (например, "до 14 30").' });
     }
     const hours = parseInt(match[1]);
     const minutes = parseInt(match[2]);
@@ -43,6 +45,6 @@ async function handleAfkModalSubmit(interaction) {
         hour: '2-digit', minute: '2-digit',
         timeZone: 'Europe/Moscow'
     }).format(targetMsk);
-    await interaction.reply({ content: `✅ АФК успешно начат до **${timeString} (МСК)**.`, ephemeral: true });
+    await interaction.editReply({ content: `✅ АФК успешно начат до **${timeString} (МСК)**.` });
     await (0, afkEmbed_1.refreshAfkEmbed)(interaction.client);
 }

@@ -43,6 +43,10 @@ function getAllowedOrigins() {
     if (process.env.ADMIN_HOST_URL)
         origins.add(process.env.ADMIN_HOST_URL);
     // Local defaults
+    origins.add('http://localhost');
+    origins.add('http://localhost:80');
+    origins.add('http://admin.localhost');
+    origins.add('http://admin.localhost:80');
     origins.add('http://localhost:5173');
     origins.add('http://admin.localhost:5173');
     return [...origins];

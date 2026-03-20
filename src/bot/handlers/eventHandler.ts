@@ -23,8 +23,15 @@ const IPC_BOT_BASE_URL = process.env.IPC_BOT_BASE_URL || 'http://localhost:3001'
 export async function loadEvents(client: Client) {
     console.log('🛠  Загрузка событий...');
 
+    const bgJobsDisabled = process.env.BOT_DISABLE_BG_JOBS === '1';
+
     client.once(Events.ClientReady, async (c) => {
         console.log(`✅ Успешно! Бот авторизован как ${c.user.tag}`);
+
+        // Prevent heavy background jobs from stacking up and delaying interaction handlers.
+        let isReconcilingActivityForums = false;
+        let isAutoRefreshingActiveEvents = false;
+        const shouldSkipBgJobs = () => Date.now() < ((globalThis as any).__discordBgSkipUntil ?? 0);
 
         // Guild lock: read allowed guild from DB and auto-leave unauthorized servers
         const [guildRow] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'GUILD_ID'));
@@ -41,17 +48,25 @@ export async function loadEvents(client: Client) {
         
         // Start AFK expiry check interval (every 1 minute)
         setInterval(() => {
+            if (bgJobsDisabled) return;
+            if (shouldSkipBgJobs()) return;
             checkExpiredAfks(c).catch(console.error);
         }, 60_000);
 
         // Start Majestic API Online check interval (every 30 seconds)
         setInterval(() => {
+            if (bgJobsDisabled) return;
+            if (shouldSkipBgJobs()) return;
             refreshServerOnlineEmbed(c).catch(console.error);
         }, 30_000);
 
         // Run embed deployer immediately and then every 15 seconds
-        checkAndDeployEmbeds(c).catch(console.error);
+        if (!bgJobsDisabled && !shouldSkipBgJobs()) {
+            checkAndDeployEmbeds(c).catch(console.error);
+        }
         setInterval(() => {
+            if (bgJobsDisabled) return;
+            if (shouldSkipBgJobs()) return;
             checkAndDeployEmbeds(c).catch(console.error);
         }, 15_000);
 
@@ -59,6 +74,10 @@ export async function loadEvents(client: Client) {
         // - if threads were deleted manually in Discord, they should disappear from the site
         // - but never delete everything when Discord fetch returns an empty list
         setInterval(async () => {
+            if (bgJobsDisabled) return;
+            if (shouldSkipBgJobs()) return;
+            if (isReconcilingActivityForums) return;
+            isReconcilingActivityForums = true;
             try {
                 const [forumRow] = await db
                     .select()
@@ -135,11 +154,17 @@ export async function loadEvents(client: Client) {
                 }).catch(() => null);
             } catch (e) {
                 console.error('❌ Ошибка reconcile activity threads:', e);
+            } finally {
+                isReconcilingActivityForums = false;
             }
         }, 300_000);
 
         // Auto-refresh event embeds when they transition to InProgress (every 30s)
         setInterval(async () => {
+            if (bgJobsDisabled) return;
+            if (shouldSkipBgJobs()) return;
+            if (isAutoRefreshingActiveEvents) return;
+            isAutoRefreshingActiveEvents = true;
             try {
                 const now = new Date();
                 // Find open events whose time has arrived
@@ -159,6 +184,8 @@ export async function loadEvents(client: Client) {
                 }
             } catch (e) {
                 console.error('❌ Ошибка автообновления активных мероприятий:', e);
+            } finally {
+                isAutoRefreshingActiveEvents = false;
             }
         }, 30_000);
     });
@@ -166,7 +193,12 @@ export async function loadEvents(client: Client) {
     // Detect when managed embeds are deleted from Discord, and reset their MESSAGE_ID so they redeploy
     client.on('messageDelete', async (message) => {
         try {
-            if (!message.author?.bot) return; // Only care about our bot's messages
+            // `messageDelete` can be received as partial without `author`,
+            // so we must also check `authorId`.
+            const botUserId = client.user?.id;
+            const messageAuthorId = (message as any).authorId as string | undefined;
+            const isOurBotMessage = Boolean(message.author?.bot) || (botUserId ? messageAuthorId === botUserId : false);
+            if (!isOurBotMessage) return;
             
             const managedKeys = ['TICKETS_MESSAGE_ID', 'AFK_MESSAGE_ID', 'EVENTS_MESSAGE_ID', 'ONLINE_MESSAGE_ID'];
             
@@ -181,7 +213,9 @@ export async function loadEvents(client: Client) {
                     .where(eq(systemSettings.key, foundSetting.key));
                 
                 // Immediately trigger logic
-                checkAndDeployEmbeds(client).catch(console.error);
+                if (!bgJobsDisabled) {
+                    checkAndDeployEmbeds(client).catch(console.error);
+                }
             }
         } catch (error) {
             console.error('❌ Ошибка в обработчике messageDelete:', error);

@@ -2,8 +2,18 @@ import { Client, GatewayIntentBits, Collection, Partials, EmbedBuilder, Colors, 
 import { config } from 'dotenv';
 import { loadCommands } from './handlers/commandHandler';
 import { loadEvents } from './handlers/eventHandler';
+import { Agent, setGlobalDispatcher } from 'undici';
 
 config({ path: '.env' });
+
+// Limit outgoing HTTP concurrency for stability (prevents connection timeouts during bursts).
+// This affects both `fetch` used in our code and Discord.js REST requests (via undici).
+setGlobalDispatcher(
+    new Agent({
+        connections: 100,
+        keepAliveTimeout: 30_000,
+    })
+);
 
 const client = new Client({
     intents: [

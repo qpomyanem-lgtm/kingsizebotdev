@@ -14,6 +14,7 @@ import { eq, and, asc } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { canManageEvents, TIER_MAP } from './eventShared';
 import { refreshEventEmbed } from './eventEmbedPayload.js';
+import { showModalViaInteractionCallback } from '../../../lib/interactionResponses';
 
 export async function handleEventActionBtn(interaction: ButtonInteraction) {
     const parts = interaction.customId.split('_');
@@ -23,9 +24,33 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
     const action = parts[1];
     const eventId = parts.slice(2).join('_');
 
+    const isModalAction = action === 'selectmap' || action === 'setgroup';
+    // For non-modal actions we must ACK quickly to avoid Discord 10062 "Unknown interaction".
+    if (!isModalAction) {
+        await interaction.deferUpdate().catch(() => {});
+    }
+
+    const sendEphemeral = async (payload: any) => {
+        if (isModalAction) {
+            return interaction.reply(payload);
+        }
+
+        // After deferUpdate() followUp() is allowed; if deferUpdate() failed,
+        // fall back to reply() to avoid InteractionNotReplied.
+        try {
+            if (interaction.deferred || interaction.replied) {
+                return await interaction.followUp(payload);
+            }
+            return await interaction.reply(payload);
+        } catch (e) {
+            // If the interaction token is already expired (10062), there's nothing to do.
+            return null;
+        }
+    };
+
     const [event] = await db.select().from(events).where(eq(events.id, eventId));
     if (!event) {
-        await interaction.reply({ content: 'Событие не найдено или уже удалено.', ephemeral: true });
+        await sendEphemeral({ content: 'Событие не найдено или уже удалено.', ephemeral: true });
         return;
     }
 
@@ -36,11 +61,11 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
             (await canManageEvents(interaction.member as GuildMember | null, interaction.user.id));
 
         if (!canManage) {
-            await interaction.reply({ content: 'У вас нет прав для управления этим списком.', ephemeral: true });
+            await sendEphemeral({ content: 'У вас нет прав для управления этим списком.', ephemeral: true });
             return;
         }
         if (event.status === 'Closed') {
-            await interaction.reply({ content: 'Список уже закрыт.', ephemeral: true });
+            await sendEphemeral({ content: 'Список уже закрыт.', ephemeral: true });
             return;
         }
 
@@ -69,7 +94,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
         }
 
         const row = new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons);
-        await interaction.reply({ content: 'Управление списком:', components: [row], ephemeral: true });
+        await sendEphemeral({ content: 'Управление списком:', components: [row], ephemeral: true });
         return;
     }
 
@@ -80,13 +105,13 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
             (await canManageEvents(interaction.member as GuildMember | null, interaction.user.id));
 
         if (!canManage) {
-            await interaction.reply({ content: 'У вас нет прав.', ephemeral: true });
+            await sendEphemeral({ content: 'У вас нет прав.', ephemeral: true });
             return;
         }
 
         const maps = await db.select().from(eventMaps).orderBy(asc(eventMaps.name));
         if (maps.length === 0) {
-            await interaction.reply({
+            await sendEphemeral({
                 content: 'Нет доступных карт. Добавьте карты через панель управления.',
                 ephemeral: true,
             });
@@ -118,7 +143,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
         };
 
         // @ts-ignore — raw API
-        await interaction.showModal(rawModal);
+        await showModalViaInteractionCallback(interaction, rawModal as any);
         return;
     }
 
@@ -128,11 +153,11 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
             interaction.user.id === event.creatorId ||
             (await canManageEvents(interaction.member as GuildMember | null, interaction.user.id));
         if (!canChange) {
-            await interaction.reply({ content: 'У вас нет прав для изменения этого списка.', ephemeral: true });
+            await sendEphemeral({ content: 'У вас нет прав для изменения этого списка.', ephemeral: true });
             return;
         }
         if (event.status === 'Closed') {
-            await interaction.reply({ content: 'Список уже закрыт.', ephemeral: true });
+            await sendEphemeral({ content: 'Список уже закрыт.', ephemeral: true });
             return;
         }
 
@@ -146,7 +171,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
             .setRequired(true);
 
         modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(groupInput));
-        await interaction.showModal(modal);
+        await showModalViaInteractionCallback(interaction, modal);
         return;
     }
 
@@ -156,12 +181,13 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
             interaction.user.id === event.creatorId ||
             (await canManageEvents(interaction.member as GuildMember | null, interaction.user.id));
         if (!canClose) {
-            await interaction.reply({ content: 'У вас нет прав для закрытия списка.', ephemeral: true });
+            await sendEphemeral({ content: 'У вас нет прав для закрытия списка.', ephemeral: true });
             return;
         }
 
         await db.update(events).set({ status: 'Closed' }).where(eq(events.id, eventId));
-        await interaction.update({ content: 'Список закрыт.', components: [] });
+        // Avoid interaction.update() after deferUpdate().
+        await interaction.message.edit({ content: 'Список закрыт.', components: [] }).catch(() => {});
 
         // Refresh the original event message (not the ephemeral management reply)
         if (interaction.channel && event.messageId) {
@@ -177,14 +203,14 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
 
     // ── join / leave (public) ──
     if (event.status === 'Closed') {
-        await interaction.reply({ content: 'Этот список закрыт, вы не можете изменить свое участие.', ephemeral: true });
+        await sendEphemeral({ content: 'Этот список закрыт, вы не можете изменить свое участие.', ephemeral: true });
         return;
     }
 
     // Block join/leave when event is in progress (time has arrived)
     const now = new Date();
     if (now >= event.eventTime && (action === 'join' || action === 'leave')) {
-        await interaction.reply({ content: 'Мероприятие уже идёт, изменить участие нельзя.', ephemeral: true });
+        await sendEphemeral({ content: 'Мероприятие уже идёт, изменить участие нельзя.', ephemeral: true });
         return;
     }
 
@@ -198,13 +224,13 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
             .where(and(eq(eventParticipants.eventId, eventId), eq(eventParticipants.userId, interaction.user.id)));
 
         if (existing.length > 0) {
-            await interaction.reply({ content: 'Вы уже записаны в этот список.', ephemeral: true });
+            await sendEphemeral({ content: 'Вы уже записаны в этот список.', ephemeral: true });
             return;
         }
 
         await db.insert(eventParticipants).values({ id: uuidv4(), eventId, userId: interaction.user.id, tier });
         await refreshEventEmbed(interaction.message, eventId);
-        await interaction.reply({ content: 'Вы успешно присоединились к списку!', ephemeral: true });
+        await sendEphemeral({ content: 'Вы успешно присоединились к списку!', ephemeral: true });
     }
 
     if (action === 'leave') {
@@ -219,7 +245,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
             );
 
         if (existing.length === 0) {
-            await interaction.reply({ content: 'Вы не находитесь в этом списке.', ephemeral: true });
+            await sendEphemeral({ content: 'Вы не находитесь в этом списке.', ephemeral: true });
             return;
         }
 
@@ -232,7 +258,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
                 ),
             );
         await refreshEventEmbed(interaction.message, eventId);
-        await interaction.reply({ content: 'Вы покинули список.', ephemeral: true });
+        await sendEphemeral({ content: 'Вы покинули список.', ephemeral: true });
     }
 }
 

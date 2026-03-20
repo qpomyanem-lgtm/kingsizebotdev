@@ -20,7 +20,19 @@ export default async function settingsController(fastify: FastifyInstance) {
             return;
         }
 
-        const { session, user } = await lucia.validateSession(sessionId);
+        let session: any;
+        let user: any;
+        try {
+            const validated = await lucia.validateSession(sessionId);
+            session = validated.session;
+            user = validated.user;
+        } catch (e) {
+            // Invalid/stale cookie should not crash settings endpoints.
+            console.error('❌ validateSession failed in settings:', e);
+            reply.status(401).send({ error: 'Unauthorized' });
+            return;
+        }
+
         if (!session || !user) {
             reply.status(401).send({ error: 'Unauthorized' });
             return;
@@ -44,7 +56,10 @@ export default async function settingsController(fastify: FastifyInstance) {
                 reply.send(roles);
             } catch (error) {
                 console.error('❌ Ошибка настроек:', error);
-                reply.status(500).send({ error: 'Internal Server Error' });
+                reply.status(500).send({
+                    error: 'Internal Server Error',
+                    details: error instanceof Error ? error.message : String(error),
+                });
             }
         },
     );
@@ -69,7 +84,10 @@ export default async function settingsController(fastify: FastifyInstance) {
                 reply.send({ success: true });
             } catch (error) {
                 console.error('❌ Ошибка настроек:', error);
-                reply.status(500).send({ error: 'Internal Server Error' });
+                reply.status(500).send({
+                    error: 'Internal Server Error',
+                    details: error instanceof Error ? error.message : String(error),
+                });
             }
         },
     );
@@ -85,7 +103,10 @@ export default async function settingsController(fastify: FastifyInstance) {
                 reply.send(settings);
             } catch (error) {
                 console.error('❌ Ошибка настроек:', error);
-                reply.status(500).send({ error: 'Internal Server Error' });
+                reply.status(500).send({
+                    error: 'Internal Server Error',
+                    details: error instanceof Error ? error.message : String(error),
+                });
             }
         },
     );
@@ -119,7 +140,10 @@ export default async function settingsController(fastify: FastifyInstance) {
                 reply.send({ success: true });
             } catch (error) {
                 console.error('❌ Ошибка настроек:', error);
-                reply.status(500).send({ error: 'Internal Server Error' });
+                reply.status(500).send({
+                    error: 'Internal Server Error',
+                    details: error instanceof Error ? error.message : String(error),
+                });
             }
         },
     );

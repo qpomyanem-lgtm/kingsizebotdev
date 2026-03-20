@@ -6,7 +6,11 @@ const db_1 = require("../../db");
 const schema_1 = require("../../db/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const onlineStatusEmbedBuilder_1 = require("../embeds/online/onlineStatusEmbedBuilder");
+let isRefreshingOnlineEmbed = false;
 async function refreshServerOnlineEmbed(client) {
+    if (isRefreshingOnlineEmbed)
+        return;
+    isRefreshingOnlineEmbed = true;
     try {
         const keys = await db_1.db.select().from(schema_1.systemSettings).where((0, drizzle_orm_1.inArray)(schema_1.systemSettings.key, ['ONLINE_CHANNEL_ID', 'ONLINE_MESSAGE_ID']));
         const channelId = keys.find(k => k.key === 'ONLINE_CHANNEL_ID')?.value;
@@ -23,7 +27,7 @@ async function refreshServerOnlineEmbed(client) {
         let accentColor = 0xE02424;
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
             const response = await fetch('https://api.majestic-files.net/meta/servers?region=ru', {
                 signal: controller.signal,
                 headers: {
@@ -90,5 +94,10 @@ async function refreshServerOnlineEmbed(client) {
     }
     catch (e) {
         console.error('❌ Ошибка обновления сообщения со статусом сервера:', e);
+        // Put background jobs into cooldown to avoid blocking interaction responses.
+        globalThis.__discordBgSkipUntil = Date.now() + 60_000;
+    }
+    finally {
+        isRefreshingOnlineEmbed = false;
     }
 }

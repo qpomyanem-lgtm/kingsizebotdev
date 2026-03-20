@@ -11,6 +11,7 @@ import { events } from '../../../../db/schema';
 import { v4 as uuidv4 } from 'uuid';
 import { canManageEvents, EVENT_TYPE_LABELS } from './eventShared';
 import { refreshEventEmbed } from './eventEmbedPayload.js';
+import { showModalViaInteractionCallback } from '../../../lib/interactionResponses';
 
 // ── 1. Create Button → Show Modal with raw Radio Group ─────────
 
@@ -83,12 +84,15 @@ export async function handleEventCreateBtn(interaction: ButtonInteraction) {
     };
 
     // @ts-ignore — raw API call for RadioGroup support
-    await interaction.showModal(rawModal);
+    await showModalViaInteractionCallback(interaction, rawModal as any);
 }
 
 // ── 2. Create Modal Submit → Insert Event ────────────────────────
 
 export async function handleEventCreateModalSubmit(interaction: ModalSubmitInteraction) {
+    // Acknowledge immediately to avoid interaction token expiry.
+    await interaction.deferReply({ ephemeral: true }).catch(() => {});
+
     // Extract radio value for event type from raw components
     const rawComponents = (interaction as any).components ?? [];
     let eventType: 'Capt' | 'MCL' | 'ВЗЗ' = 'MCL'; // fallback
@@ -106,7 +110,7 @@ export async function handleEventCreateModalSubmit(interaction: ModalSubmitInter
 
     const slots = parseInt(slotsStr, 10);
     if (isNaN(slots) || slots <= 0) {
-        await interaction.reply({ content: 'Количество слотов должно быть положительным числом.', ephemeral: true });
+        await interaction.editReply({ content: 'Количество слотов должно быть положительным числом.' });
         return;
     }
 
@@ -158,7 +162,7 @@ export async function handleEventCreateModalSubmit(interaction: ModalSubmitInter
     const utcDate = new Date(isoMoscow);
 
     if (!interaction.channel || interaction.channel.isDMBased() || !('send' in interaction.channel)) {
-        await interaction.reply({ content: 'Невозможно отправить сообщение в этот канал.', ephemeral: true });
+        await interaction.editReply({ content: 'Невозможно отправить сообщение в этот канал.' });
         return;
     }
 
@@ -180,9 +184,8 @@ export async function handleEventCreateModalSubmit(interaction: ModalSubmitInter
     });
 
     await refreshEventEmbed(msg as any, eventId);
-    await interaction.reply({
+    await interaction.editReply({
         content: `Список на ${EVENT_TYPE_LABELS[eventType] ?? eventType} успешно создан!`,
-        ephemeral: true,
     });
 }
 

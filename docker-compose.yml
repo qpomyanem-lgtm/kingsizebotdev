@@ -71,6 +71,10 @@ services:
       BOT_OWNER_ID: ${BOT_OWNER_ID}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-.localhost}
 
+      # Diagnostic: disable background interval jobs to test interaction stability.
+      # Set BOT_DISABLE_BG_JOBS=1 (in .env) and restart containers.
+      BOT_DISABLE_BG_JOBS: ${BOT_DISABLE_BG_JOBS:-0}
+
       # Bot -> backend REST/WS triggers
       IPC_BACKEND_BASE_URL: ${IPC_BACKEND_BASE_URL:-http://backend:3000}
 

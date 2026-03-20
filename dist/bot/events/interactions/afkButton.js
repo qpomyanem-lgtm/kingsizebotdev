@@ -7,6 +7,7 @@ const db_1 = require("../../../db");
 const schema_1 = require("../../../db/schema");
 const drizzle_orm_1 = require("drizzle-orm");
 const afkEmbed_1 = require("../../lib/afkEmbed");
+const interactionResponses_1 = require("../../lib/interactionResponses");
 async function handleAfkStartBtn(interaction) {
     // Check if user has at least one configured role
     const configuredRoles = await db_1.db.select().from(schema_1.roleSettings);
@@ -42,7 +43,7 @@ async function handleAfkStartBtn(interaction) {
         .setStyle(discord_js_1.TextInputStyle.Paragraph)
         .setRequired(true);
     modal.addComponents(new discord_js_1.ActionRowBuilder().addComponents(timeField), new discord_js_1.ActionRowBuilder().addComponents(reasonField));
-    await interaction.showModal(modal);
+    await (0, interactionResponses_1.showModalViaInteractionCallback)(interaction, modal);
 }
 async function handleAfkEndBtn(interaction) {
     const existing = await db_1.db.select().from(schema_1.afkEntries)

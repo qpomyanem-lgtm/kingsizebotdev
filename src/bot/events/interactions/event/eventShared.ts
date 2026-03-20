@@ -24,16 +24,51 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
     Capt: 'Капт',
 };
 
+type CachedRoleId = { value: string | null; expiresAt: number };
+const roleIdCache: Record<string, CachedRoleId | undefined> = {};
+const roleIdLoadPromises: Record<string, Promise<string | null> | undefined> = {};
+
+const ROLE_ID_CACHE_TTL_MS = 60_000;
+const ROLE_ID_LOAD_TIMEOUT_MS = 5_000;
+
+function startRoleIdLoad(key: string) {
+    if (roleIdLoadPromises[key]) return;
+
+    // Best-effort background load; if it takes too long, we just keep cache empty.
+    roleIdLoadPromises[key] = Promise.race([
+        getRoleIdByKey(key),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), ROLE_ID_LOAD_TIMEOUT_MS)),
+    ])
+        .then((value) => {
+            roleIdCache[key] = { value, expiresAt: Date.now() + ROLE_ID_CACHE_TTL_MS };
+            return value;
+        })
+        .catch(() => {
+            roleIdCache[key] = { value: null, expiresAt: Date.now() + 10_000 };
+            return null;
+        })
+        .finally(() => {
+            roleIdLoadPromises[key] = undefined;
+        });
+}
+
+function getRoleIdCachedInstant(key: string): string | null {
+    const cached = roleIdCache[key];
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) return cached.value ?? null;
+
+    // Trigger background load but do not block button handlers.
+    startRoleIdLoad(key);
+    return null;
+}
+
 export async function canManageEvents(member: GuildMember | null, userId: string): Promise<boolean> {
     const botOwnerId = process.env.BOT_OWNER_ID;
     if (botOwnerId && userId === botOwnerId.trim()) return true;
     if (!member) return false;
 
-    for (const key of EVENT_MANAGER_ROLE_KEYS) {
-        const roleId = await getRoleIdByKey(key);
-        if (roleId && member.roles.cache.has(roleId)) return true;
-    }
-    return false;
+    const roleIds = EVENT_MANAGER_ROLE_KEYS.map((k) => getRoleIdCachedInstant(k));
+    return roleIds.some((roleId) => !!roleId && member.roles.cache.has(roleId));
 }
 
 /** Returns Unix timestamp in seconds for a Moscow-time Date */

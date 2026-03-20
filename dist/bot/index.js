@@ -4,7 +4,14 @@ const discord_js_1 = require("discord.js");
 const dotenv_1 = require("dotenv");
 const commandHandler_1 = require("./handlers/commandHandler");
 const eventHandler_1 = require("./handlers/eventHandler");
+const undici_1 = require("undici");
 (0, dotenv_1.config)({ path: '.env' });
+// Limit outgoing HTTP concurrency for stability (prevents connection timeouts during bursts).
+// This affects both `fetch` used in our code and Discord.js REST requests (via undici).
+(0, undici_1.setGlobalDispatcher)(new undici_1.Agent({
+    connections: 100,
+    keepAliveTimeout: 30_000,
+}));
 const client = new discord_js_1.Client({
     intents: [
         discord_js_1.GatewayIntentBits.Guilds,

@@ -4,7 +4,11 @@ import { systemSettings } from '../../db/schema';
 import { inArray } from 'drizzle-orm';
 import { buildOnlineStatusContainer } from '../embeds/online/onlineStatusEmbedBuilder';
 
+let isRefreshingOnlineEmbed = false;
+
 export async function refreshServerOnlineEmbed(client: Client) {
+    if (isRefreshingOnlineEmbed) return;
+    isRefreshingOnlineEmbed = true;
     try {
         const keys = await db.select().from(systemSettings).where(inArray(systemSettings.key, ['ONLINE_CHANNEL_ID', 'ONLINE_MESSAGE_ID']));
         const channelId = keys.find(k => k.key === 'ONLINE_CHANNEL_ID')?.value;
@@ -23,7 +27,7 @@ export async function refreshServerOnlineEmbed(client: Client) {
 
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
             
             const response = await fetch('https://api.majestic-files.net/meta/servers?region=ru', {
                 signal: controller.signal,
@@ -91,6 +95,10 @@ export async function refreshServerOnlineEmbed(client: Client) {
         });
     } catch (e) {
         console.error('❌ Ошибка обновления сообщения со статусом сервера:', e);
+        // Put background jobs into cooldown to avoid blocking interaction responses.
+        (globalThis as any).__discordBgSkipUntil = Date.now() + 60_000;
+    } finally {
+        isRefreshingOnlineEmbed = false;
     }
 }
 

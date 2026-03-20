@@ -9,6 +9,8 @@ import { buildEventsPanelComponents } from '../embeds/panels/eventsPanel.js';
 import { buildOnlineStatusPanelComponents } from '../embeds/panels/onlineStatusPanel.js';
 import { buildAfkEndPanelComponents, buildAfkStartPanelComponents } from '../embeds/panels/afkPanels.js';
 
+let isDeployingEmbeds = false;
+
 interface EmbedConfig {
     channelKey: string;
     messageKey: string;
@@ -17,6 +19,8 @@ interface EmbedConfig {
 }
 
 export async function checkAndDeployEmbeds(client: Client) {
+    if (isDeployingEmbeds) return;
+    isDeployingEmbeds = true;
     const configs: EmbedConfig[] = [
         {
             channelKey: 'TICKETS_CHANNEL_ID',
@@ -66,6 +70,8 @@ export async function checkAndDeployEmbeds(client: Client) {
         }
     } catch (error) {
         console.error('❌ Ошибка в checkAndDeployEmbeds:', error);
+    } finally {
+        isDeployingEmbeds = false;
     }
 }
 
