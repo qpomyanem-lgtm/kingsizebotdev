@@ -169,8 +169,19 @@ export default async function authController(fastify: FastifyInstance) {
             return reply.status(401).send({ error: 'Unauthorized' });
         }
 
-        const { session, user } = await lucia.validateSession(sessionId);
-        if (!session) {
+        let session: Awaited<ReturnType<typeof lucia.validateSession>>['session'];
+        let user: Awaited<ReturnType<typeof lucia.validateSession>>['user'];
+        try {
+            ({ session, user } = await lucia.validateSession(sessionId));
+        } catch (e) {
+            // Session cookie can be stale/invalid (e.g. after config changes).
+            // We must not crash the API with 500; treat it as "logged out".
+            console.error('❌ validateSession failed:', e);
+            const sessionCookie = lucia.createBlankSessionCookie();
+            reply.setCookie(sessionCookie.name, sessionCookie.value, sessionCookie.attributes);
+            return reply.status(401).send({ error: 'Unauthorized' });
+        }
+        if (!session || !user) {
             const sessionCookie = lucia.createBlankSessionCookie();
             reply.setCookie(sessionCookie.name, sessionCookie.value, sessionCookie.attributes);
             return reply.status(401).send({ error: 'Unauthorized' });

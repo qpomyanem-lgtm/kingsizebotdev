@@ -26,7 +26,8 @@
    - Redirect: `/`
 4. `GET /api/auth/me`
    - Auth: cookie Lucia session
-   - Ответ: `{ user: { ...user, role, roleSettingsAccess, roleLabel } }`
+   - Если сессия отсутствует/невалидна: HTTP `401` (и Lucia может выставить “blank session” cookie)
+   - Если сессия валидна: `{ user: { ...user, role, roleSettingsAccess, roleLabel } }`
 5. `POST /api/auth/logout`
    - Auth: cookie Lucia session
    - Ответ: `{ success: true }`
@@ -236,9 +237,12 @@
    - handler: `handleEventMapModalSubmit`
    - raw RadioGroup: `map_radio` values = `event_maps.id`
 
-## 4. IPC endpoints (HTTP inside host currently)
+## 4. IPC endpoints (HTTP inside docker/host)
 
-Текущая реализация захардкодила `127.0.0.1`, но поведенческий контракт следующий.
+Текущая реализация использует настраиваемые переменные окружения:
+- `IPC_BOT_BASE_URL` (backend -> bot IPC server)
+- `IPC_BACKEND_BASE_URL` (bot -> backend REST endpoints)
+- `IPC_BOT_LISTEN_HOST` (где бот слушает HTTP IPC сервер, для Docker должен быть `0.0.0.0`)
 
 ### Bot IPC server (listening on port 3001)
 1. `POST /ipc/refresh-event/:eventId`

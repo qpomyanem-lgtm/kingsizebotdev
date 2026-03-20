@@ -1,9 +1,14 @@
-FROM node:20-alpine AS build
+FROM node:20-slim AS build
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  python3 make g++ \
+  libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY tsconfig.json ./
 COPY drizzle.config.ts ./
@@ -11,7 +16,11 @@ COPY src ./src
 
 RUN npx tsc -p tsconfig.json
 
-FROM node:20-alpine AS runtime
+FROM node:20-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  libcairo2 libpango-1.0-0 libjpeg62-turbo libgif7 librsvg2-2 \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 ENV NODE_ENV=production

@@ -21,6 +21,8 @@ Discord bot + web dashboard для управления семьёй Majestic RP
   - `system_settings.key`, используемые в рантайме
   - embeds/panels, которые бот deploy’ит/обновляет
 
+`AGENTS_CONTRACT.md` — источник истины (source of truth). `README.md` — витрина: он описывает то же поведение людям, но при расхождениях ориентируйтесь на контракт.
+
 Если вы меняете код, но нужно сохранить поведение 1:1 — сначала обновляйте контракт, затем — код.
 
 ---
@@ -197,41 +199,243 @@ npm run dev
 
 ## VPS Ubuntu: Docker для всех сервисов
 
-1. Установите Docker Engine + Compose plugin (или Docker Compose).
-2. Склонируйте репозиторий и поставьте зависимости (локально на VPS):
+Ниже сценарий “с нуля” для VPS Ubuntu (поднимаются `postgres`, `redis`, `backend`, `bot`, `frontend` через Docker Compose).
+
+### 0) Подключение к серверу по SSH (консоль)
+
+Заранее узнайте `SERVER_IP` (или домен/IP) и имя пользователя, под которым вас пускают (часто `root` или `ubuntu` — зависит от провайдера).
+
+#### Вариант A: подключение с паролем (самый простой)
+В PowerShell на Windows:
 ```bash
-git clone <repo-url> bot
-cd bot
+ssh <USER>@<SERVER_IP>
+```
+Если SSH на нестандартном порту:
+```bash
+ssh -p <PORT> <USER>@<SERVER_IP>
+```
+
+#### Вариант B: подключение по SSH-ключу (рекомендуется)
+1. Если ключей нет, создайте:
+```bash
+ssh-keygen -t ed25519 -C "<ваш_email>"
+```
+2. Посмотрите/скопируйте `public key`:
+```bash
+type $env:USERPROFILE\.ssh\id_ed25519.pub
+```
+3. Добавьте ключ на сервер (войдите временно по паролю, затем выполните на сервере):
+```bash
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+nano ~/.ssh/authorized_keys
+```
+Вставьте туда содержимое вашего `*.pub` и сохраните.
+
+4. Закройте права:
+```bash
+chmod 600 ~/.ssh/authorized_keys
+```
+
+5. Подключайтесь с ключом:
+```bash
+ssh -i $env:USERPROFILE\.ssh\id_ed25519 <USER>@<SERVER_IP>
+```
+
+#### Если вдруг SSH не запущен на сервере
+На VPS:
+```bash
+sudo apt-get update
+sudo apt-get install -y openssh-server
+sudo systemctl enable --now ssh
+```
+
+### 1) Установите Docker и Compose
+1. Установите зависимости:
+```bash
+sudo apt-get update
+sudo apt-get install -y git curl ca-certificates
+```
+
+2. Поставьте Docker Engine и плагин Compose:
+```bash
+sudo apt-get install -y docker.io docker-compose-plugin
+```
+
+3. Включите Docker:
+```bash
+sudo systemctl enable --now docker
+```
+
+4. (Если нужно) добавьте текущего пользователя в группу `docker`:
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+### 2) Настройте доступ в firewall
+Обычно достаточно открыть порт `80` (frontend) и при необходимости `443`:
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+```
+
+### 3) Клонируйте проект
+1. Выберите папку, например `/opt`:
+```bash
+cd /opt
+git clone <YOUR_REPO_URL> majestic-family-bot
+cd majestic-family-bot
+```
+
+2. Поставьте зависимости (нужны для `drizzle-kit` и `tsx` на этапе миграций/seed):
+```bash
 npm install
 ```
 
-3. Настройте `.env`:
+### 4) Настройте `.env`
+1. Скопируйте шаблон:
 ```bash
 cp .env.example .env
 ```
-Обязательно задайте:
-- `DATABASE_URL` (на postgres сервис)
-- `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `BOT_OWNER_ID`
-- `HOST_URL`, `PUBLIC_HOST_URL`, `ADMIN_HOST_URL` (чтобы CORS и редиректы работали из браузера)
-- IPC:
-  - `IPC_BOT_BASE_URL=http://bot:3001`
-  - `IPC_BACKEND_BASE_URL=http://backend:3000`
 
-4. Поднимите всё:
+2. Заполните обязательные переменные:
+```env
+DISCORD_TOKEN=...
+DISCORD_CLIENT_ID=...
+DISCORD_CLIENT_SECRET=...
+BOT_OWNER_ID=...
+
+# DB/Redis (используйте те же значения, что и в docker-compose.yml)
+DATABASE_URL=postgresql://postgres:postgres@postgres:5432/majestic_family
+REDIS_URL=redis://redis:6379
+
+# Адреса для браузера/CORS + OAuth редиректов
+HOST_URL=http://<DOMAIN>
+PUBLIC_HOST_URL=http://<DOMAIN>
+ADMIN_HOST_URL=http://<ADMIN_DOMAIN>   # можно тем же доменом, если нет поддомена
+COOKIE_DOMAIN=.<DOMAIN>              # напр. .example.com
+
+# IPC (Docker-сеть)
+IPC_BOT_BASE_URL=http://bot:3001
+IPC_BACKEND_BASE_URL=http://backend:3000
+IPC_BOT_LISTEN_HOST=0.0.0.0
+```
+
+### 4.5) Discord OAuth2: добавьте Redirect URLs
+В Discord Developer Portal:
+1. Откройте приложение (бот).
+2. Раздел `OAuth2` / `Redirects` (OAuth2 Redirect URLs).
+3. Добавьте минимум:
+   - `${PUBLIC_HOST_URL}/api/auth/discord/callback`
+   - `${ADMIN_HOST_URL}/api/auth/discord/callback` (если `ADMIN_HOST_URL` отличается от `PUBLIC_HOST_URL`)
+
+После этого логин через OAuth начнёт редиректить обратно в backend.
+
+### 5) Поднимите всё через Docker Compose
+С пересборкой:
 ```bash
 docker compose up -d --build
 ```
 
-5. Примените миграции и seed:
+Проверить, что контейнеры поднялись:
 ```bash
-npm run db:push
-npx tsx src/db/seed.ts
+docker compose ps
 ```
 
-6. Проверьте логи:
+Смотреть логи по сервисам:
 ```bash
-docker compose logs -f
+docker compose logs -f backend
+docker compose logs -f bot
+docker compose logs -f frontend
 ```
+
+Если сборка падает на `canvas` (native bindings), убедитесь, что Dockerfile для `backend/bot` использует `node:20-slim` и ставит системные зависимости (в текущем репозитории это уже исправлено).
+
+### 6) Миграции и seed
+После того как `postgres` поднялся:
+
+Важно: `drizzle-kit push` должен примениться к той Postgres БД, которая запущена в docker-compose. Если выполнить миграции “с хоста” с неверным `DATABASE_URL` (например, с `postgres` вместо `localhost`), то таблицы `users/sessions` могут не появиться и OAuth/`/api/auth/me` будет падать.
+
+Вариант A (самый надёжный): выполнять миграции внутри контейнера `backend`
+```bash
+docker compose exec -T backend npx drizzle-kit push
+docker compose exec -T backend npx tsx src/db/seed.ts
+```
+
+Вариант B: выполнять миграции на хосте (Windows/Linux), но используйте `DATABASE_URL` на `localhost:5432`
+```bash
+DATABASE_URL='postgresql://postgres:postgres@localhost:5432/majestic_family' npm run db:push
+DATABASE_URL='postgresql://postgres:postgres@localhost:5432/majestic_family' npx tsx src/db/seed.ts
+```
+
+Важно:
+- `seed.ts` засевает только `role_settings`.
+- `system_settings` (каналы/сообщения/ключи панелей) задаются отдельно (через админ-панель или вручную через `/api/settings/system`).
+
+### 7) Настройте `system_settings` (самое важное после seed)
+Откройте админ-панель (frontend/админ на вашем `ADMIN_HOST_URL`) и зайдите Discord’ом.
+
+Нужно задать как минимум ключи:
+- `GUILD_ID`
+- `TICKETS_CHANNEL_ID`, `TICKETS_MESSAGE_ID`
+- `EVENTS_CHANNEL_ID`, `EVENTS_MESSAGE_ID`
+- `ONLINE_CHANNEL_ID`, `ONLINE_MESSAGE_ID`
+- `AFK_CHANNEL_ID`, `AFK_MESSAGE_ID`
+- `ACTIVITY_FORUM_CHANNEL_ID`
+- `APPLICATION_FIELD_1..5` + `APPLICATION_FIELD_*_PLACEHOLDER` + `APPLICATION_FIELD_*_STYLE` (если хотите менять поля анкеты)
+
+После этого бот начнёт деплоить/обновлять панели.
+
+### 8) Устранение неполадок
+1. Посмотреть причину падения контейнера:
+```bash
+docker compose logs -f <service>
+```
+2. Проверить, что БД доступна:
+```bash
+docker compose exec -T postgres psql -U postgres -d majestic_family -c "select now();"
+```
+3. Проверить, что backend слушает порт `3000` внутри docker-сети:
+```bash
+docker compose exec -T backend sh -lc "node -e 'fetch(\"http://localhost:3000/api/auth/me\").then(r=>console.log(\"status\", r.status)).catch(e=>{console.error(e);process.exit(1);})'"
+```
+
+---
+## Обновление репозитория (Git)
+
+### Вариант 1: через команды (рекомендуется на сервере)
+1. Проверить изменения:
+```bash
+git status
+```
+2. Добавить изменения в staging:
+```bash
+git add .
+```
+3. Сделать commit:
+```bash
+git commit -m "Update docs and runtime fixes"
+```
+4. Запушить в GitHub (обычно в ветку `main`):
+```bash
+git push origin main
+```
+
+Важно: не коммить секреты типа `.env` — коммить нужно только `.env.example` (она в репозитории).
+
+### Вариант 2: через интерфейс IDE (Cursor/VS Code)
+1. Откройте вкладку `Source Control` в IDE.
+2. Убедитесь, что вы на нужной ветке (обычно `main`).
+3. Нажмите `Stage All` (или выберите файлы и `Stage`).
+4. Введите сообщение коммита и нажмите `Commit`.
+5. Нажмите `Push` (или `Push to origin`).
+
+### Вариант 3: через GitHub Desktop (если используешь)
+1. Нажмите `Fetch origin`.
+2. В `Changes` убедитесь, что выбранные файлы подсвечены, и нажмите `Commit to main`.
+3. Нажмите `Push origin`.
 
 ---
 
@@ -317,6 +521,15 @@ CASCADE;
    - socket.io event names не меняются
    - `customId` строка/префиксы не меняются
    - ключи `system_settings` не переименовываются
+
+Как использовать контракт именно ИИ-агенту (workflow):
+1. Получите задачу → выпишите, что именно меняется по контракту: какие REST/IPC роуты, socket.io events, `customId`, ключи `system_settings`.
+2. Проверьте в `AGENTS_CONTRACT.md` текущие “истины” (пути/методы/названия/ключи) и сравните с тем, что предлагает изменение.
+3. Если изменение затрагивает контракт — сначала внесите правки в `AGENTS_CONTRACT.md`, затем реализуйте код так, чтобы он соответствовал контракту 1:1.
+4. После реализации обновите `README.md`:
+   - либо добавьте/уточните разделы, которые отражают поведение для людей,
+   - либо сделайте краткую ссылку/обновление там, где README описывает “контрактные” вещи (но источник истины остаётся `AGENTS_CONTRACT.md`).
+5. Обязательно выполните проверку сборки/типа (например `npm run typecheck` и `npm run build`) и убедитесь, что имена контрактных сущностей (endpoints/customId/events/system_settings/IPC) не расходятся.
 
 ---
 

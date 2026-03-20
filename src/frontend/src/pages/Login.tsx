@@ -13,7 +13,8 @@ export function Login() {
   }
 
   const handleDiscordLogin = () => {
-    window.location.href = `${import.meta.env.VITE_API_URL}/api/auth/discord?origin=${encodeURIComponent(window.location.origin)}`;
+    // Use relative URL so backend generates OAuth redirect URI from the current domain.
+    window.location.href = `/api/auth/discord?origin=${encodeURIComponent(window.location.origin)}`;
   };
 
   return (
