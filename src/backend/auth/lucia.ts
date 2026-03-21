@@ -11,10 +11,14 @@ config({ path: ".env" });
 // Adapter works at runtime; we cast to keep type-level compatibility.
 const adapter = new DrizzlePostgreSQLAdapter(db as any, sessions as any, users as any);
 
+const useSecureCookies = (process.env.PUBLIC_HOST_URL ?? '').startsWith('https');
+const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
+
 export const lucia = new Lucia(adapter, {
 	sessionCookie: {
 		attributes: {
-			secure: process.env.NODE_ENV === "production",
+			secure: useSecureCookies,
+			domain: cookieDomain,
 		}
 	},
 	getUserAttributes: (attributes) => {

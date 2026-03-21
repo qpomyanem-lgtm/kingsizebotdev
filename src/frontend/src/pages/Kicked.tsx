@@ -11,6 +11,8 @@ export interface ExcludedMember {
     gameStaticId: string;
     status: 'kicked' | 'blacklisted';
     joinedAt: string;
+    kickReason: string | null;
+    kickedAt: string | null;
 }
 
 export function Kicked() {
@@ -58,6 +60,7 @@ export function Kicked() {
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Пользователь</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">NICK | STATIC</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Статус</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Причина</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Дата</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Действия</th>
                                 </tr>
@@ -89,8 +92,15 @@ export function Kicked() {
                                                 <span className="px-2.5 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-medium">Исключен</span>
                                             )}
                                         </td>
+                                        <td className="px-6 py-4 text-sm text-slate-600 max-w-[240px]">
+                                            {member.kickReason ? (
+                                                <span className="truncate block" title={member.kickReason}>{member.kickReason}</span>
+                                            ) : (
+                                                <span className="text-slate-400">—</span>
+                                            )}
+                                        </td>
                                         <td className="px-6 py-4 text-sm text-slate-600">
-                                            {formatMoscowDate(member.joinedAt)}
+                                            {formatMoscowDate(member.kickedAt || member.joinedAt)}
                                         </td>
                                         <td className="px-6 py-4 text-right">
                                             {member.status === 'blacklisted' && (

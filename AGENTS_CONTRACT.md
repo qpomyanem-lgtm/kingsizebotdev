@@ -342,7 +342,22 @@
    - Если у пользователя есть KINGSIZE/NEWKINGSIZE — создаёт/обновляет `members` (role, tier, status).
    - Если tier изменился — обновляет `event_participants.tier` в незакрытых мероприятиях и обновляет embed через IPC.
    - При получении роли семьи впервые — создаёт activity thread через IPC.
-   - Если роль семьи утрачена — устанавливает `members.status = 'kicked'`, `tier = 'NONE'`.
+   - Если роль семьи утрачена — устанавливает `members.status = 'kicked'`, `tier = 'NONE'`, `kickReason = 'Утеряна роль семьи'`, `kickedAt = now`.
+
+### `guildMemberRemove`
+- Если покинувший сервер пользователь есть в `members` со `status = 'active'`:
+  - Пытается прочитать audit log (`AuditLogEvent.MemberKick`, limit 5, в окне 10 сек) для определения причины кика.
+  - Если найден audit-запись — `kickReason = auditLog.reason` (или `'Кикнут (причина не указана)'`).
+  - Если не найден — `kickReason = 'Покинул сервер'`.
+  - Обновляет: `status = 'kicked'`, `tier = 'NONE'`, `kickReason`, `kickedAt = now`.
+  - Обновляет связанную `applications.status = 'excluded'`.
+
+### `guildBanAdd`
+- Если забаненный пользователь есть в `members` и `status != 'blacklisted'`:
+  - Получает причину бана через `guild.bans.fetch(user.id)`.
+  - Обновляет: `status = 'blacklisted'`, `tier = 'NONE'`, `kickReason = ban.reason`, `kickedAt = now`.
+  - Обновляет связанную `applications.status = 'blacklist'`.
+- Требует intent `GuildModeration`.
 
 ### `guildMemberAdd`
 - Если вступивший пользователь есть в `members` со `status = 'blacklisted'` — автоматически добавляет роль BLACKLIST.

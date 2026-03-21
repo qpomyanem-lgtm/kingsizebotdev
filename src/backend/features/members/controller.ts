@@ -4,7 +4,7 @@ import { members, users, applications, events, eventParticipants } from '../../.
 import { eq, desc, inArray, and, ne } from 'drizzle-orm';
 import { lucia } from '../../auth/lucia';
 import { z } from 'zod';
-import { removeRole, getRoleIdByKey, addRole, setNickname, refreshEventEmbedRest } from '../../lib/discordMemberActions.js';
+import { removeRole, getRoleIdByKey, addRole, setNickname, refreshEventEmbedRest, unbanMember } from '../../lib/discordMemberActions.js';
 
 export default async function membersController(fastify: FastifyInstance) {
     const checkAdmin = async (request: any, reply: any) => {
@@ -206,7 +206,7 @@ export default async function membersController(fastify: FastifyInstance) {
             const newStatus = blacklist ? 'blacklisted' : 'kicked';
             const [excluded] = await db
                 .update(members)
-                .set({ status: newStatus })
+                .set({ status: newStatus, kickReason: reason, kickedAt: new Date() })
                 .where(eq(members.id, id))
                 .returning();
 
@@ -235,7 +235,8 @@ export default async function membersController(fastify: FastifyInstance) {
             if (!member) return reply.status(404).send({ error: 'Member not found' });
             if (member.status !== 'blacklisted') return reply.status(400).send({ error: 'Member is not blacklisted' });
 
-            // Remove BLACKLIST role from Discord
+            // Unban from Discord server and remove BLACKLIST role
+            await unbanMember(member.discordId);
             const blacklistRoleId = await getRoleIdByKey('BLACKLIST');
             if (blacklistRoleId) await removeRole(member.discordId, blacklistRoleId);
 

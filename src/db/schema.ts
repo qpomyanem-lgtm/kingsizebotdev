@@ -63,6 +63,8 @@ export const members = pgTable('members', {
   status: text('status', { enum: ['active', 'kicked', 'blacklisted'] }).default('active').notNull(),
   applicationId: text('application_id'),
   joinedAt: timestamp('joined_at').defaultNow().notNull(),
+  kickReason: text('kick_reason'),
+  kickedAt: timestamp('kicked_at'),
 });
 
 export const afkEntries = pgTable('afk_entries', {

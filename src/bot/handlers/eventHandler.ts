@@ -1,4 +1,4 @@
-import { Client, Events } from 'discord.js';
+import { Client, Events, AuditLogEvent } from 'discord.js';
 import { randomUUID } from 'crypto';
 import { getAdminRoleIds } from '../../backend/lib/discordRoles';
 import { addRole, getRoleIdByKey } from '../../backend/lib/discordMemberActions.js';
@@ -362,7 +362,7 @@ export async function loadEvents(client: Client) {
                 // If they exist and are active, we must "kick" them.
                 if (existing && existing.status === 'active') {
                     await db.update(members)
-                        .set({ status: 'kicked', tier: 'NONE' })
+                        .set({ status: 'kicked', tier: 'NONE', kickReason: 'Утеряна роль семьи', kickedAt: new Date() })
                         .where(eq(members.id, existing.id));
                     console.log(`👢 Автоматически исключен ${newMember.user.tag} из состава семьи (утеряна основная роль)`);
                 }
@@ -385,6 +385,92 @@ export async function loadEvents(client: Client) {
             }
         } catch (err) {
             console.error('❌ Ошибка восстановления черного списка:', err);
+        }
+    });
+
+    // Auto-track kicks: when a member with KINGSIZE/NEWKINGSIZE leaves or is kicked
+    client.on('guildMemberRemove', async (member) => {
+        try {
+            const [dbMember] = await db.select().from(members).where(eq(members.discordId, member.id));
+            if (!dbMember || dbMember.status !== 'active') return;
+
+            // Check if this removal was caused by a ban — if so, let guildBanAdd handle it
+            try {
+                const banAuditLogs = await member.guild.fetchAuditLogs({
+                    type: AuditLogEvent.MemberBanAdd,
+                    limit: 5,
+                });
+                const banLog = banAuditLogs.entries.find(
+                    (entry) => entry.target?.id === member.id && (Date.now() - entry.createdTimestamp) < 15000
+                );
+                if (banLog) {
+                    console.log(`ℹ️ ${member.user.tag} удалён из-за бана — обработка передана guildBanAdd`);
+                    return;
+                }
+            } catch (e) {
+                // If we can't check audit logs, proceed with kick handling
+            }
+
+            // Try to fetch audit log to determine if this was a kick and get reason
+            let kickReason: string | null = 'Покинул сервер';
+            try {
+                const auditLogs = await member.guild.fetchAuditLogs({
+                    type: AuditLogEvent.MemberKick,
+                    limit: 5,
+                });
+                const kickLog = auditLogs.entries.find(
+                    (entry) => entry.target?.id === member.id && (Date.now() - entry.createdTimestamp) < 10000
+                );
+                if (kickLog) {
+                    kickReason = kickLog.reason || 'Кикнут (причина не указана)';
+                }
+            } catch (e) {
+                console.error('⚠️ Не удалось получить аудит-лог для кика:', e);
+            }
+
+            await db.update(members)
+                .set({ status: 'kicked', tier: 'NONE', kickReason, kickedAt: new Date() })
+                .where(eq(members.id, dbMember.id));
+
+            // Update linked application status
+            if (dbMember.applicationId) {
+                await db.update(applications).set({ status: 'excluded' }).where(eq(applications.id, dbMember.applicationId));
+            }
+
+            console.log(`👢 Участник ${member.user.tag} покинул/кикнут с сервера — исключен из состава (причина: ${kickReason})`);
+        } catch (err) {
+            console.error('❌ Ошибка обработки guildMemberRemove:', err);
+        }
+    });
+
+    // Auto-track bans: when a member is banned on the server
+    client.on('guildBanAdd', async (ban) => {
+        try {
+            const [dbMember] = await db.select().from(members).where(eq(members.discordId, ban.user.id));
+            if (!dbMember) return;
+            if (dbMember.status === 'blacklisted') return; // Already blacklisted
+
+            // Fetch full ban info for reason
+            let banReason: string | null = 'Заблокирован (причина не указана)';
+            try {
+                const fullBan = await ban.guild.bans.fetch(ban.user.id);
+                if (fullBan.reason) banReason = fullBan.reason;
+            } catch (e) {
+                console.error('⚠️ Не удалось получить информацию о бане:', e);
+            }
+
+            await db.update(members)
+                .set({ status: 'blacklisted', tier: 'NONE', kickReason: banReason, kickedAt: new Date() })
+                .where(eq(members.id, dbMember.id));
+
+            // Update linked application status
+            if (dbMember.applicationId) {
+                await db.update(applications).set({ status: 'blacklist' }).where(eq(applications.id, dbMember.applicationId));
+            }
+
+            console.log(`⛔ Участник ${ban.user.tag} забанен на сервере — добавлен в ЧС (причина: ${banReason})`);
+        } catch (err) {
+            console.error('❌ Ошибка обработки guildBanAdd:', err);
         }
     });
 

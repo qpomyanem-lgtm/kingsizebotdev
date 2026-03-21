@@ -88,6 +88,29 @@ export async function setNickname(discordUserId: string, nickname: string): Prom
 }
 
 /**
+ * Unban a user from the Discord guild.
+ */
+export async function unbanMember(discordUserId: string): Promise<boolean> {
+    const token = process.env.DISCORD_TOKEN;
+    const guildId = await getGuildId();
+    if (!token || !guildId) return false;
+
+    try {
+        const res = await fetch(`${DISCORD_API_BASE}/guilds/${guildId}/bans/${discordUserId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bot ${token}` },
+        });
+        if (!res.ok && res.status !== 404) {
+            console.error(`❌ [Discord API] Ошибка unbanMember: ${res.status} ${res.statusText}`);
+        }
+        return res.ok || res.status === 404;
+    } catch (err) {
+        console.error(`❌ [Discord API] Исключение unbanMember:`, err);
+        return false;
+    }
+}
+
+/**
  * Get Discord role ID by key from role_settings.
  */
 export async function getRoleIdByKey(key: string): Promise<string | null> {

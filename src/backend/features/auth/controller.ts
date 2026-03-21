@@ -30,6 +30,11 @@ export default async function authController(fastify: FastifyInstance) {
         return `${proto}://${host}`;
     };
 
+    const isSecureRequest = (req: FastifyRequest) => {
+        const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0];
+        return proto === 'https';
+    };
+
     fastify.get('/api/auth/discord', async (req: FastifyRequest, reply: FastifyReply) => {
         const query = req.query as { origin?: string };
         const destOrigin = query.origin || process.env.ADMIN_HOST_URL || 'http://admin.localhost:5173';
@@ -39,9 +44,11 @@ export default async function authController(fastify: FastifyInstance) {
         const discordAuth = createDiscordAuth(redirectUri);
         const url = await discordAuth.createAuthorizationURL(state, null, ['identify']);
 
+        const secure = isSecureRequest(req);
+
         reply.setCookie('discord_oauth_state', state, {
             path: '/',
-            secure: process.env.NODE_ENV === 'production',
+            secure,
             httpOnly: true,
             maxAge: 60 * 10,
             sameSite: 'lax',
@@ -49,7 +56,7 @@ export default async function authController(fastify: FastifyInstance) {
 
         reply.setCookie('discord_oauth_dest', destOrigin, {
             path: '/',
-            secure: process.env.NODE_ENV === 'production',
+            secure,
             httpOnly: true,
             maxAge: 60 * 10,
             sameSite: 'lax',
