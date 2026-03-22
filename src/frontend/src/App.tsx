@@ -18,11 +18,52 @@ import { ChannelSettings } from './pages/ChannelSettings';
 import { ApplicationSettings } from './pages/ApplicationSettings';
 import { PublicLanding } from './pages/PublicLanding';
 import { Activity } from './pages/Activity';
+import { AccessSettings } from './pages/AccessSettings';
 import { useAuth } from './lib/api';
 
 import type { ReactNode } from 'react';
 
 const queryClient = new QueryClient();
+
+const DEFAULT_ROUTE_BY_PERMISSION: Array<{ permission: string; path: string }> = [
+  { permission: 'site:applications:view', path: '/applications' },
+  { permission: 'site:activity:view', path: '/activity' },
+  { permission: 'site:members:view', path: '/members' },
+  { permission: 'site:afk:view', path: '/afk' },
+  { permission: 'site:mcl:view', path: '/mcl' },
+  { permission: 'site:captures:view', path: '/captures' },
+  { permission: 'site:mcl_maps:view', path: '/mcl-maps' },
+  { permission: 'site:archive:view', path: '/archive' },
+  { permission: 'site:kicked:view', path: '/kicked' },
+  { permission: 'site:logs:view', path: '/logs' },
+  { permission: 'site:guide:view', path: '/guide' },
+  { permission: 'site:application_settings:view', path: '/settings/applications' },
+  { permission: 'site:settings_server:view', path: '/settings/server' },
+  { permission: 'site:settings_roles:view', path: '/settings/roles' },
+  { permission: 'site:settings_channels:view', path: '/settings/channels' },
+  { permission: 'site:settings_access:view', path: '/settings/access' },
+];
+
+function DefaultDashboardRoute() {
+  const { data: user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <div className="w-8 h-8 rounded-full border-4 border-primary border-t-transparent animate-spin"></div>
+      </div>
+    );
+  }
+
+  const permissions = user?.permissions ?? [];
+  const firstAllowed = DEFAULT_ROUTE_BY_PERMISSION.find((item) => permissions.includes(item.permission));
+
+  if (!firstAllowed) {
+    return <Navigate to="/login?error=NoPanelAccess" replace />;
+  }
+
+  return <Navigate to={firstAllowed.path} replace />;
+}
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { data: user, isLoading, isError } = useAuth();
@@ -52,10 +93,8 @@ function RequireAuth({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace />;
   }
 
-  // The backend already validates hasAdminPanelAccess which covers bot owner, owner, ., dep, high, recruit.
-  // The backend returns user.role = 'owner' or 'admin' or 'user'.
-  // Access to the panel is granted for owner or admin.
-  const hasPanelAccess = user.role === 'owner' || user.role === 'admin';
+  // Access is granted if the user has any permissions (meaning they have at least one access role).
+  const hasPanelAccess = user.permissions && user.permissions.length > 0;
   if (!hasPanelAccess) {
     return <Navigate to="/login?error=NoPanelAccess" replace />;
   }
@@ -90,7 +129,7 @@ export default function App() {
               <DashboardLayout />
             </RequireAuth>
           }>
-            <Route index element={<Navigate to="/applications" replace />} />
+            <Route index element={<DefaultDashboardRoute />} />
             <Route path="applications" element={<Applications />} />
             <Route path="members" element={<Members />} />
             <Route path="afk" element={<Afk />} />
@@ -106,6 +145,7 @@ export default function App() {
             <Route path="settings/server" element={<ServerSettings />} />
             <Route path="settings/channels" element={<ChannelSettings />} />
             <Route path="settings/applications" element={<ApplicationSettings />} />
+            <Route path="settings/access" element={<AccessSettings />} />
           </Route>
         </Routes>
       </Router>

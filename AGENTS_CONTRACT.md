@@ -27,35 +27,87 @@
 4. `GET /api/auth/me`
    - Auth: cookie Lucia session
    - Если сессия отсутствует/невалидна: HTTP `401` (и Lucia может выставить “blank session” cookie)
-   - Если сессия валидна: `{ user: { ...user, role, roleSettingsAccess, roleLabel } }`
+   - Если сессия валидна: `{ user: { ...user, permissions: string[] } }` — объединение прав всех Discord-ролей пользователя
 5. `POST /api/auth/logout`
    - Auth: cookie Lucia session
    - Ответ: `{ success: true }`
 
-### Settings
+### Settings — Roles (prefix `/api/settings`)
+
+All roles are stored in `roles` table. Created with `type='none'`; type assigned via `/:id/access`.
+Auth uses `requirePermission` middleware (not the old `hasRoleSettingsAccess`).
+
 1. `GET /api/settings/roles`
-   - Auth: Lucia session + `hasRoleSettingsAccess`
-   - Ответ: rows из `role_settings`
-2. `PATCH /api/settings/roles`
-   - Body: `{ updates: Array<{ key: string, discordRoleId: string | null }> }`
-   - Auth: Lucia session + `hasRoleSettingsAccess`
-   - Ответ: `{ success: true }`
-3. `GET /api/settings/system`
-   - Auth: Lucia session + `hasRoleSettingsAccess`
-   - Ответ: rows из `system_settings`
-4. `PATCH /api/settings/system`
-   - Body: `{ updates: Array<{ key: string, value: string | null }> }`
-   - Auth: Lucia session + `hasRoleSettingsAccess`
-   - Upsert: если key существует — update, иначе — insert
-   - Ответ: `{ success: true }`
-5. `POST /api/settings/sync-members`
-   - Auth: Lucia session + `hasRoleSettingsAccess`
-   - Side effects: синхронизация `members` из Discord guild:
-     - читает `GUILD_ID`
-     - читает роли `KINGSIZE`, `NEWKINGSIZE`, `TIER1..3`
-     - добавляет/обновляет `members`
-     - “кикает” (status -> `kicked`, tier -> `NONE`) тех, кто больше не имеет нужных ролей
-   - Ответ: `{ success: true, added, updated, kicked, totalFound }`
+   - Auth: `requirePermission('site:settings_roles:view')`
+   - Query: `type?: 'system'|'access'`, `systemType?: 'main'|'new'|'tier'|'blacklist'`
+   - Response: `Role[]` ordered by `priority` asc
+2. `POST /api/settings/roles`
+   - Auth: `requirePermission('site:settings_roles:actions')`
+   - Body: `{ name: string, discordRoleId?: string, color?: string, icon?: string }`
+   - Creates with `type='none'`, `systemType=null`, `isAdmin=false`
+   - Response: `Role` (HTTP 201)
+3. `PATCH /api/settings/roles/:id`
+   - Auth: `requirePermission('site:settings_roles:actions')`
+   - Body: `{ name?, discordRoleId?, color?, icon? }` (display fields only)
+   - Response: updated `Role`
+4. `DELETE /api/settings/roles/:id`
+   - Auth: `requirePermission('site:settings_roles:actions')`
+   - @everyone (`isEveryone=true`) cannot be deleted → HTTP 403
+   - Response: `{ success: true }`
+5. `PUT /api/settings/roles/reorder`
+   - Auth: `requirePermission('site:settings_roles:actions')`
+   - Body: `{ order: Array<{ id: string, priority: number }> }`
+   - Response: `{ success: true }`
+6. `PATCH /api/settings/roles/:id/access`
+   - Auth: `requirePermission('site:settings_access:actions')`
+   - Body: `{ type?, systemType?, isAdmin?, canManageSettings? }`
+   - @everyone cannot change type → HTTP 400
+   - Response: updated `Role`
+7. `GET /api/settings/roles/:id/permissions`
+   - Auth: `requirePermission('site:settings_access:view')`
+   - Response: `string[]`
+8. `PUT /api/settings/roles/:id/permissions`
+   - Auth: `requirePermission('site:settings_access:actions')`
+   - Body: `{ permissions: string[] }`; filtered by `ALLOWED_PERMISSIONS`
+   - Response: `{ success: true, permissions: string[] }`
+9. `GET /api/settings/admin-roles`
+   - No auth guard
+   - Response: `{ id, name }[]` (type='access', isAdmin=true), ordered by priority
+
+### Settings — System
+1. `GET /api/settings/system`
+   - Auth: `requirePermission('site:settings_server:view')`
+   - Response: rows from `system_settings`
+2. `PATCH /api/settings/system`
+   - Auth: `requirePermission('site:settings_server:actions')`
+   - Body: `{ updates: Array<{ key: string, value: string | null }> }`; upsert by key
+   - Response: `{ success: true }`
+3. `POST /api/settings/sync-members`
+   - Auth: `requirePermission('site:settings_server:actions')`
+   - Syncs `members` from Discord guild by Discord roles (KINGSIZE/NEWKINGSIZE/TIER 1-3)
+   - Response: `{ success: true, added, updated, kicked, totalFound }`
+
+### Access (prefix `/api/access-roles`)
+
+Used by the Access Settings page. Manages roles with `type='access'` and their permissions.
+
+1. `GET /api/access-roles`
+   - Auth: `requirePermission('site:settings_access:view')`
+   - Response: access roles with `permissions: string[]`
+2. `GET /api/access-roles/permissions-catalog`
+   - Auth: `requirePermission('site:settings_access:view')`
+   - Response: `string[]` — full list of allowed permission strings
+3. `POST /api/access-roles`
+   - Auth: `requirePermission('site:settings_access:actions')`
+   - Body: `{ name, discordRoleId?, color?, priority?, isAdmin?, canManageSettings?, permissions? }`
+4. `PATCH /api/access-roles/:id`
+   - Auth: `requirePermission('site:settings_access:actions')`
+5. `DELETE /api/access-roles/:id`
+   - Auth: `requirePermission('site:settings_access:actions')`
+6. `PUT /api/access-roles/:id/permissions`
+   - Auth: `requirePermission('site:settings_access:actions')`
+   - Body: `{ permissions: string[] }`
+
 
 ### Applications (prefix `/api/applications`)
 1. `GET /api/applications/`
@@ -211,10 +263,11 @@
    - action форматы:
      - `event_join_<eventId>`
      - `event_leave_<eventId>`
-     - `event_manage_<eventId>`
-     - `event_close_<eventId>`
+     - `event_manage_<eventId>` — доступно только создателю события (`interaction.user.id === event.creatorId`)
+     - `event_close_<eventId>` — доступно только создателю события
      - `event_setgroup_<eventId>`
      - `event_selectmap_<eventId>` (MCL/ВЗЗ только)
+   - Право `bot:event:create` нужно для создания событий; отдельного `bot:event:manage` нет
 6. `activity_upload_<memberId>`
    - handler: `handleActivityUploadBtn` (`activityInteractions.ts`)
 7. `interview_ready_<applicationId>`

@@ -6,6 +6,21 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+// Intercept 401 responses: clear auth cache and redirect to login
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      // Don't redirect if already on login page or it's the /api/auth/me call handled by useAuth
+      const url = error.config?.url ?? '';
+      if (!url.includes('/api/auth/') && !window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const useAuth = () => {
   return useQuery({
     queryKey: ['auth', 'me'],
@@ -22,9 +37,10 @@ export const useAuth = () => {
       }
     },
     retry: 1,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
     refetchOnMount: false,
+    refetchInterval: 30_000,
     staleTime: 30_000,
   });
 };

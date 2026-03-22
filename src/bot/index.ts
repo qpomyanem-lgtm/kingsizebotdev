@@ -20,6 +20,7 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildMessageReactions,
         GatewayIntentBits.GuildModeration,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.MessageContent
@@ -143,6 +144,32 @@ async function startBot() {
                 res.end('OK');
             } catch (err) {
                 console.error('❌ [IPC Сервер] Ошибка create-activity-thread:', err);
+                res.writeHead(500);
+                res.end('Error');
+            }
+        } else if (req.method === 'POST' && req.url?.startsWith('/ipc/close-activity-thread/')) {
+            const memberId = req.url.split('/').pop();
+            try {
+                if (!memberId) throw new Error('No memberId provided');
+                const { closeActivityByMemberId } = await import('./events/interactions/activityInteractions.js');
+                await closeActivityByMemberId(client, memberId);
+                res.writeHead(200);
+                res.end('OK');
+            } catch (err) {
+                console.error('❌ [IPC Сервер] Ошибка close-activity-thread:', err);
+                res.writeHead(500);
+                res.end('Error');
+            }
+        } else if (req.method === 'POST' && req.url?.startsWith('/ipc/update-activity-message/')) {
+            const memberId = req.url.split('/').pop();
+            try {
+                if (!memberId) throw new Error('No memberId provided');
+                const { updateActivityThreadMessage } = await import('./events/interactions/activityInteractions.js');
+                await updateActivityThreadMessage(client, memberId);
+                res.writeHead(200);
+                res.end('OK');
+            } catch (err) {
+                console.error('❌ [IPC Сервер] Ошибка update-activity-message:', err);
                 res.writeHead(500);
                 res.end('Error');
             }

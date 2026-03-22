@@ -1,13 +1,14 @@
-import { Client, ForumChannel, Message } from 'discord.js';
+import { Client, ForumChannel, Message, MessageReaction, PartialMessageReaction, User, PartialUser } from 'discord.js';
 import { randomUUID } from 'crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../../../../db';
-import { activityDmSessions, activityScreenshots, activityThreads, members, systemSettings } from '../../../../db/schema';
+import { activityScreenshots, activityThreads, members, systemSettings } from '../../../../db/schema';
 import {
     countMemberScreenshots,
     extractImageUrlsFromMessage,
     parseActivityThreadName,
     triggerSiteRefresh,
+    updateThreadMessage,
     MAX_SCREENSHOTS,
 } from './activityShared';
 
@@ -20,7 +21,7 @@ export async function handleActivityForumMessage(client: Client, message: Messag
     const threadId = message.channelId;
 
     const [threadRow] = await db.select().from(activityThreads).where(eq(activityThreads.discordThreadId, threadId)).limit(1);
-    if (!threadRow) return false;
+    if (!threadRow || threadRow.status === 'completed') return false;
 
     const urls = extractImageUrlsFromMessage(message);
     if (urls.length === 0) return false;
@@ -47,6 +48,8 @@ export async function handleActivityForumMessage(client: Client, message: Messag
                 dedupeKey,
                 imageUrl,
                 sourceType: 'forum',
+                screenshotStatus: 'pending',
+                forumMessageId: message.id,
             })
             .onConflictDoNothing({ target: activityScreenshots.dedupeKey })
             .returning({ id: activityScreenshots.id });
@@ -58,10 +61,60 @@ export async function handleActivityForumMessage(client: Client, message: Messag
     }
 
     if (added > 0) {
+        const [member] = await db.select().from(members).where(eq(members.id, threadRow.memberId)).limit(1);
+        if (member) {
+            await updateThreadMessage(client, threadRow, threadRow.memberId, member.discordId);
+        }
         await triggerSiteRefresh();
     }
 
     return added > 0;
+}
+
+/**
+ * Handle reaction add on forum screenshot messages.
+ * ✅ = approve, ❌ = reject.
+ * Only the acceptedByDiscordId user can approve/reject.
+ */
+export async function handleActivityReaction(client: Client, reaction: MessageReaction | PartialMessageReaction, user: User | PartialUser) {
+    if (user.bot) return;
+
+    const emoji = reaction.emoji.name;
+    if (emoji !== '✅' && emoji !== '❌') return;
+
+    const messageId = reaction.message.id;
+    const channelId = reaction.message.channelId;
+
+    // Check if this message is in an activity thread
+    const [threadRow] = await db.select().from(activityThreads).where(eq(activityThreads.discordThreadId, channelId)).limit(1);
+    if (!threadRow || threadRow.status === 'completed') return;
+
+    // Only the accepted-by user can approve/reject
+    if (threadRow.acceptedByDiscordId && threadRow.acceptedByDiscordId !== user.id) return;
+
+    // Find screenshot by forumMessageId
+    const [screenshot] = await db
+        .select()
+        .from(activityScreenshots)
+        .where(and(eq(activityScreenshots.forumMessageId, messageId), eq(activityScreenshots.screenshotStatus, 'pending')))
+        .limit(1);
+
+    if (!screenshot) return;
+
+    const newStatus = emoji === '✅' ? 'approved' : 'rejected';
+
+    await db.update(activityScreenshots).set({
+        screenshotStatus: newStatus,
+        reviewedByDiscordId: user.id,
+    }).where(eq(activityScreenshots.id, screenshot.id));
+
+    // Update the thread status message
+    const [member] = await db.select().from(members).where(eq(members.id, threadRow.memberId)).limit(1);
+    if (member) {
+        await updateThreadMessage(client, threadRow, threadRow.memberId, member.discordId);
+    }
+
+    await triggerSiteRefresh();
 }
 
 // Rebuild DB from existing forum threads.

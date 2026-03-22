@@ -21,11 +21,25 @@ export const sessions = pgTable('sessions', {
   }).notNull(),
 });
 
-export const roleSettings = pgTable('role_settings', {
-  key: text('key').primaryKey(),
-  discordRoleId: text('discord_role_id'),
+export const roles = pgTable('roles', {
+  id: text('id').primaryKey(),
   name: text('name').notNull(),
-  requiresAdmin: boolean('requires_admin').default(false).notNull(),
+  discordRoleId: text('discord_role_id').unique(),
+  color: text('color').default('#6366f1').notNull(),
+  icon: text('icon'),
+  priority: integer('priority').notNull().default(0),
+  type: text('type', { enum: ['system', 'access', 'none'] }).notNull().default('none'),
+  systemType: text('system_type', { enum: ['main', 'new', 'tier', 'blacklist'] }),
+  isAdmin: boolean('is_admin').default(false).notNull(),
+  canManageSettings: boolean('can_manage_settings').default(false).notNull(),
+  isEveryone: boolean('is_everyone').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const rolePermissions = pgTable('role_permissions', {
+  id: text('id').primaryKey(),
+  roleId: text('role_id').notNull().references(() => roles.id, { onDelete: 'cascade' }),
+  permission: text('permission').notNull(),
 });
 
 export const systemSettings = pgTable('system_settings', {
@@ -58,13 +72,14 @@ export const members = pgTable('members', {
   discordAvatarUrl: text('discord_avatar_url'),
   gameNickname: text('game_nickname').notNull(),
   gameStaticId: text('game_static_id').notNull(),
-  role: text('role', { enum: ['KINGSIZE', 'NEWKINGSIZE'] }).default('NEWKINGSIZE').notNull(),
-  tier: text('tier', { enum: ['TIER 1', 'TIER 2', 'TIER 3', 'NONE'] }).default('NONE').notNull(),
+  roleId: text('role_id').references(() => roles.id),
+  tierRoleId: text('tier_role_id').references(() => roles.id),
   status: text('status', { enum: ['active', 'kicked', 'blacklisted'] }).default('active').notNull(),
   applicationId: text('application_id'),
   joinedAt: timestamp('joined_at').defaultNow().notNull(),
   kickReason: text('kick_reason'),
   kickedAt: timestamp('kicked_at'),
+  kickedByAdminUsername: text('kicked_by_admin_username'),
 });
 
 export const afkEntries = pgTable('afk_entries', {
@@ -109,7 +124,7 @@ export const eventParticipants = pgTable('event_participants', {
   id: text('id').primaryKey(),
   eventId: text('event_id').notNull().references(() => events.id),
   userId: text('user_id').notNull(),
-  tier: integer('tier').notNull(),
+  tierRoleId: text('tier_role_id').references(() => roles.id),
   joinedAt: timestamp('joined_at').defaultNow().notNull(),
 });
 
@@ -133,6 +148,9 @@ export const activityThreads = pgTable('activity_threads', {
   discordThreadId: text('discord_thread_id').notNull().unique(),
   threadName: text('thread_name').notNull(),
   presentInDiscord: boolean('present_in_discord').notNull().default(true),
+  acceptedByDiscordId: text('accepted_by_discord_id'),
+  status: text('status', { enum: ['active', 'completed'] }).notNull().default('active'),
+  dmMessageId: text('dm_message_id'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -153,6 +171,9 @@ export const activityScreenshots = pgTable('activity_screenshots', {
 
   imageUrl: text('image_url').notNull(),
   sourceType: text('source_type', { enum: ['dm', 'forum'] }).notNull().default('dm'),
+  screenshotStatus: text('screenshot_status', { enum: ['pending', 'approved', 'rejected'] }).notNull().default('pending'),
+  reviewedByDiscordId: text('reviewed_by_discord_id'),
+  forumMessageId: text('forum_message_id'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -168,3 +189,9 @@ export const activityDmSessions = pgTable('activity_dm_sessions', {
 export const activityRelations = relations(activityThreads, ({ one, many }) => ({
   screenshots: many(activityScreenshots),
 }));
+
+// ──────────────────────────────────────────────────────────────
+// RBAC: Access Roles & Permissions
+// ──────────────────────────────────────────────────────────────
+
+// Legacy tables removed — replaced by `roles` + `rolePermissions` above

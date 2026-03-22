@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, useAuth } from '../lib/api';
 import { formatMoscowDate } from '../lib/time';
-import { Clock, UserCheck, ShieldAlert, TimerOff, UserMinus, Moon } from 'lucide-react';
+import { Clock, UserCheck, ShieldAlert, TimerOff, UserMinus, Moon, Search, Filter } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export interface AfkEntry {
@@ -46,6 +46,7 @@ function TimeRemaining({ endsAt }: { endsAt: string }) {
 
 export function Afk() {
     const [filter, setFilter] = useState<'active' | 'ended'>('active');
+    const [searchQuery, setSearchQuery] = useState('');
     const { data: user } = useAuth();
     const queryClient = useQueryClient();
 
@@ -67,8 +68,18 @@ export function Afk() {
         }
     });
 
-    const displayedAfks = afkEntries?.filter(afk => afk.status === filter) || [];
-    const canEndAfk = user?.roleLabel && ['BOT OWNER', 'OWNER', '.', 'DEP', 'HIGH'].includes(user.roleLabel);
+    const displayedAfks = afkEntries?.filter(afk => {
+        const matchesStatus = afk.status === filter;
+        const query = searchQuery.trim().toLowerCase();
+        const matchesSearch =
+            !query ||
+            afk.discordUsername.toLowerCase().includes(query) ||
+            afk.discordId.includes(query) ||
+            afk.reason.toLowerCase().includes(query);
+
+        return matchesStatus && matchesSearch;
+    }) || [];
+    const canEndAfk = !!(user?.permissions as string[] | undefined)?.includes('site:afk:actions');
 
     const getEndReasonBadge = (type: string | null, adminName: string | null) => {
         switch (type) {
@@ -81,9 +92,10 @@ export function Afk() {
 
     return (
         <div className="h-full flex flex-col font-sans relative">
-            <header className="mb-8 flex justify-between items-end">
+            <header className="mb-6">
+                <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center shadow-lg shadow-slate-900/20 text-white">
+                    <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20 text-white">
                         <Moon className="w-6 h-6" />
                     </div>
                     <div>
@@ -93,23 +105,44 @@ export function Afk() {
                         </p>
                     </div>
                 </div>
-                <div className="flex gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/60 shadow-inner">
+                <span className="text-sm font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">
+                    Всего записей: {afkEntries?.filter((item) => item.status === filter).length || 0}
+                </span>
+                </div>
+            </header>
+
+            <div className="flex flex-col xl:flex-row items-start xl:items-center gap-4 mb-6">
+                <div className="relative flex-1 w-full">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <Search className="h-5 w-5 text-slate-400" />
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Поиск по Discord нику, ID или причине АФК..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/60 rounded-xl text-[13px] font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
+                    />
+                </div>
+                <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl border border-slate-200/60 shadow-sm">
+                    <Filter className="w-4 h-4 text-slate-400" />
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-2">Статус</span>
                     <button 
                         onClick={() => setFilter('active')}
-                        className={cn("px-5 py-2 rounded-xl text-[13px] font-bold transition-all duration-300", filter === 'active' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                        className={cn("px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all", filter === 'active' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}
                     >
                         Активные
                     </button>
                     <button 
                         onClick={() => setFilter('ended')}
-                        className={cn("px-5 py-2 rounded-xl text-[13px] font-bold transition-all duration-300", filter === 'ended' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                        className={cn("px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all", filter === 'ended' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}
                     >
                         Завершенные
                     </button>
                 </div>
-            </header>
+            </div>
 
-            <div className="flex-1 bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden flex flex-col">
+            <div className="flex-1 bg-white rounded-[24px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col">
                 {isLoading ? (
                     <div className="flex-1 flex items-center justify-center">
                         <div className="w-8 h-8 rounded-full border-4 border-slate-900 border-t-transparent animate-spin"></div>
@@ -117,32 +150,32 @@ export function Afk() {
                 ) : displayedAfks.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
                         <Moon className="w-12 h-12 mb-3 text-slate-200" />
-                        <p className="text-[14px] font-medium">Нет {filter === 'active' ? 'активных' : 'завершенных'} АФК</p>
+                        <p className="text-[14px] font-medium">{searchQuery ? 'Ничего не найдено' : `Нет ${filter === 'active' ? 'активных' : 'завершенных'} АФК`}</p>
                     </div>
                 ) : (
                     <div className="overflow-x-auto custom-scrollbar flex-1">
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="border-b border-slate-100 bg-slate-50/50">
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-[280px]">Пользователь</th>
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-[40%] text-center">Причина</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[280px]">Пользователь</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[40%] text-center">Причина</th>
                                     {filter === 'active' ? (
                                         <>
-                                            <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">Окончание</th>
-                                            <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Управление</th>
+                                            <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Окончание</th>
+                                            <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Управление</th>
                                         </>
                                     ) : (
                                         <>
-                                            <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">Период</th>
-                                            <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">Способ завершения</th>
+                                            <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Период</th>
+                                            <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Способ завершения</th>
                                         </>
                                     )}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {displayedAfks.map(afk => (
-                                    <tr key={afk.id} className="hover:bg-slate-50/30 transition-colors group">
-                                        <td className="px-4 py-2.5">
+                                    <tr key={afk.id} className="hover:bg-slate-50/50 transition-colors group">
+                                        <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
                                                 <img 
                                                     src={afk.discordAvatarUrl || `https://ui-avatars.com/api/?name=${afk.discordUsername}&background=random`} 
@@ -155,7 +188,7 @@ export function Afk() {
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-2.5">
+                                        <td className="px-6 py-4">
                                             <div className="flex justify-center">
                                                 <div className="text-[12px] font-medium text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5 max-w-sm break-words line-clamp-2 text-center" title={afk.reason}>
                                                     {afk.reason}
@@ -164,7 +197,7 @@ export function Afk() {
                                         </td>
                                         {filter === 'active' ? (
                                             <>
-                                                <td className="px-4 py-2.5">
+                                                <td className="px-6 py-4">
                                                     <div className="flex flex-col items-center justify-center">
                                                         <div className="text-[12px] font-bold text-slate-900">
                                                             {formatMoscowDate(afk.endsAt)}
@@ -175,28 +208,27 @@ export function Afk() {
                                                         </div>
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-2.5 text-right">
+                                                <td className="px-6 py-4 text-right">
                                                     <div className="flex justify-end gap-1 text-[12px]">
-                                                        {canEndAfk && (
-                                                            <button 
-                                                                onClick={() => {
-                                                                    if (confirm(`Завершить АФК пользователя ${afk.discordUsername}?`)) {
-                                                                        endAfkMutation.mutate(afk.id);
-                                                                    }
-                                                                }}
-                                                                disabled={endAfkMutation.isPending}
-                                                                className="w-8 h-8 flex items-center justify-center text-rose-500 bg-white border border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-100 rounded-lg transition-all shadow-sm active:scale-[0.98] disabled:opacity-50"
-                                                                title="Завершить АФК"
-                                                            >
-                                                                <UserMinus className="w-4 h-4" />
-                                                            </button>
-                                                        )}
+                                                        <button 
+                                                            onClick={() => {
+                                                                if (!canEndAfk) return;
+                                                                if (confirm(`Завершить АФК пользователя ${afk.discordUsername}?`)) {
+                                                                    endAfkMutation.mutate(afk.id);
+                                                                }
+                                                            }}
+                                                            disabled={!canEndAfk || endAfkMutation.isPending}
+                                                            className="w-8 h-8 flex items-center justify-center text-rose-500 bg-white border border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-100 rounded-lg transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            title={canEndAfk ? 'Завершить АФК' : 'Нет прав для завершения АФК'}
+                                                        >
+                                                            <UserMinus className="w-4 h-4" />
+                                                        </button>
                                                     </div>
                                                 </td>
                                             </>
                                         ) : (
                                             <>
-                                                <td className="px-4 py-2.5">
+                                                <td className="px-6 py-4">
                                                     <div className="flex flex-col items-center justify-center gap-1">
                                                         <div className="text-[11px] font-medium text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
                                                             С: <span className="font-bold text-slate-700">{formatMoscowDate(afk.startsAt)}</span>
@@ -206,7 +238,7 @@ export function Afk() {
                                                         </div>
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-2.5">
+                                                <td className="px-6 py-4">
                                                     <div className="flex justify-center">
                                                         {getEndReasonBadge(afk.endedByType, afk.endedByAdmin)}
                                                     </div>

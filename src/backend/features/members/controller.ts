@@ -1,26 +1,15 @@
 import { FastifyInstance } from 'fastify';
 import { db } from '../../../db';
-import { members, users, applications, events, eventParticipants } from '../../../db/schema.js';
-import { eq, desc, inArray, and, ne } from 'drizzle-orm';
-import { lucia } from '../../auth/lucia';
+import { members, users, applications, events, eventParticipants, roles } from '../../../db/schema.js';
+import { eq, desc, inArray, and, ne, asc } from 'drizzle-orm';
 import { z } from 'zod';
-import { removeRole, getRoleIdByKey, addRole, setNickname, refreshEventEmbedRest, unbanMember } from '../../lib/discordMemberActions.js';
+import { requireAnyPermission, requirePermission } from '../../lib/discordRoles';
+import { removeRole, addRole, setNickname, refreshEventEmbedRest, unbanMember } from '../../lib/discordMemberActions.js';
 
 export default async function membersController(fastify: FastifyInstance) {
-    const checkAdmin = async (request: any, reply: any) => {
-        const sessionId = lucia.readSessionCookie(request.headers.cookie ?? '');
-        if (!sessionId) return reply.status(401).send({ error: 'Unauthorized' });
-
-        const { session, user } = await lucia.validateSession(sessionId);
-        if (!session) return reply.status(401).send({ error: 'Unauthorized' });
-
-        const [dbUser] = await db.select().from(users).where(eq(users.discordId, user.discordId));
-        if (!dbUser) return reply.status(401).send({ error: 'Unauthorized' });
-        request.user = dbUser;
-    };
 
     // GET /api/members - List active members
-    fastify.get('/', { preValidation: checkAdmin }, async (_request, reply) => {
+    fastify.get('/', { preHandler: [requirePermission('site:members:view')] }, async (_request, reply) => {
         try {
             const allMembers = await db
                 .select()
@@ -34,14 +23,44 @@ export default async function membersController(fastify: FastifyInstance) {
         }
     });
 
-    // GET /api/members/excluded - List excluded and blacklisted members
-    fastify.get('/kicked', { preValidation: checkAdmin }, async (_request, reply) => {
+    // GET /api/members/roles - Roles metadata for members page
+    fastify.get('/roles', { preHandler: [requirePermission('site:members:view')] }, async (_request, reply) => {
+        try {
+            const allRoles = await db
+                .select()
+                .from(roles)
+                .orderBy(asc(roles.priority));
+            return reply.send(allRoles);
+        } catch (error) {
+            console.error('❌ Ошибка получения ролей для участников:', error);
+            return reply.status(500).send({ error: 'Internal Server Error' });
+        }
+    });
+
+    // GET /api/members/kicked - List excluded and blacklisted members with application info
+    fastify.get('/kicked', { preHandler: [requirePermission('site:kicked:view')] }, async (_request, reply) => {
         try {
             const excluded = await db
-                .select()
+                .select({
+                    id: members.id,
+                    discordId: members.discordId,
+                    discordUsername: members.discordUsername,
+                    discordAvatarUrl: members.discordAvatarUrl,
+                    gameNickname: members.gameNickname,
+                    gameStaticId: members.gameStaticId,
+                    status: members.status,
+                    applicationId: members.applicationId,
+                    joinedAt: members.joinedAt,
+                    kickReason: members.kickReason,
+                    kickedAt: members.kickedAt,
+                    kickedByAdminUsername: members.kickedByAdminUsername,
+                    acceptedByAdminUsername: applications.handledByAdminUsername,
+                    acceptedAt: applications.updatedAt,
+                })
                 .from(members)
+                .leftJoin(applications, eq(members.applicationId, applications.id))
                 .where(inArray(members.status, ['kicked', 'blacklisted']))
-                .orderBy(desc(members.joinedAt));
+                .orderBy(desc(members.kickedAt));
             return reply.send(excluded);
         } catch (error) {
             console.error('❌ Ошибка получения исключенных:', error);
@@ -50,7 +69,7 @@ export default async function membersController(fastify: FastifyInstance) {
     });
 
     // GET /api/members/:id - Member profile
-    fastify.get('/:id', { preValidation: checkAdmin }, async (request, reply) => {
+    fastify.get('/:id', { preHandler: [requirePermission('site:members:view')] }, async (request, reply) => {
         try {
             const { id } = request.params as { id: string };
             const [member] = await db.select().from(members).where(eq(members.id, id));
@@ -66,11 +85,11 @@ export default async function membersController(fastify: FastifyInstance) {
     const updateSchema = z.object({
         gameNickname: z.string().optional(),
         gameStaticId: z.string().optional(),
-        role: z.enum(['NEWKINGSIZE', 'KINGSIZE']).optional(),
-        tier: z.enum(['TIER 1', 'TIER 2', 'TIER 3', 'БЕЗ TIER']).optional(),
+        roleId: z.string().nullable().optional(),
+        tierRoleId: z.string().nullable().optional(),
     });
 
-    fastify.patch('/:id', { preValidation: checkAdmin }, async (request, reply) => {
+    fastify.patch('/:id', { preHandler: [requirePermission('site:members:actions')] }, async (request, reply) => {
         try {
             const { id } = request.params as { id: string };
             const data = updateSchema.parse(request.body);
@@ -78,8 +97,8 @@ export default async function membersController(fastify: FastifyInstance) {
             const updateData: Record<string, any> = {};
             if (data.gameNickname !== undefined) updateData.gameNickname = data.gameNickname;
             if (data.gameStaticId !== undefined) updateData.gameStaticId = data.gameStaticId;
-            if (data.role !== undefined) updateData.role = data.role;
-            if (data.tier !== undefined) updateData.tier = data.tier;
+            if (data.roleId !== undefined) updateData.roleId = data.roleId;
+            if (data.tierRoleId !== undefined) updateData.tierRoleId = data.tierRoleId;
 
             const [updated] = await db.update(members).set(updateData).where(eq(members.id, id)).returning();
 
@@ -91,38 +110,39 @@ export default async function membersController(fastify: FastifyInstance) {
                 await setNickname(updated.discordId, newNick);
             }
 
-            // If role changed, manage Discord roles
-            if (data.role !== undefined) {
-                const newKingsizeId = await getRoleIdByKey('NEWKINGSIZE');
-                const kingsizeId = await getRoleIdByKey('KINGSIZE');
+            // If role changed, manage Discord MAIN/NEW roles
+            if (data.roleId !== undefined) {
+                const [mainRole, newRole, selectedRole] = await Promise.all([
+                    db.select().from(roles).where(and(eq(roles.type, 'system'), eq(roles.systemType, 'main'))),
+                    db.select().from(roles).where(and(eq(roles.type, 'system'), eq(roles.systemType, 'new'))),
+                    data.roleId ? db.select().from(roles).where(eq(roles.id, data.roleId)) : Promise.resolve([]),
+                ]);
 
-                if (data.role === 'KINGSIZE') {
-                    if (newKingsizeId) await removeRole(updated.discordId, newKingsizeId);
-                    if (kingsizeId) await addRole(updated.discordId, kingsizeId);
-                } else {
-                    if (kingsizeId) await removeRole(updated.discordId, kingsizeId);
-                    if (newKingsizeId) await addRole(updated.discordId, newKingsizeId);
-                }
+                const mainDiscordRoleId = mainRole[0]?.discordRoleId || null;
+                const newDiscordRoleId = newRole[0]?.discordRoleId || null;
+
+                if (mainDiscordRoleId) await removeRole(updated.discordId, mainDiscordRoleId);
+                if (newDiscordRoleId) await removeRole(updated.discordId, newDiscordRoleId);
+
+                const selectedDiscordRoleId = selectedRole[0]?.discordRoleId || null;
+                if (selectedDiscordRoleId) await addRole(updated.discordId, selectedDiscordRoleId);
             }
 
             // If tier changed, manage Discord TIER roles
-            if (data.tier !== undefined) {
-                const tier1Id = await getRoleIdByKey('TIER1');
-                const tier2Id = await getRoleIdByKey('TIER2');
-                const tier3Id = await getRoleIdByKey('TIER3');
+            if (data.tierRoleId !== undefined) {
+                const tierRoles = await db
+                    .select()
+                    .from(roles)
+                    .where(and(eq(roles.type, 'system'), eq(roles.systemType, 'tier')))
+                    .orderBy(asc(roles.priority));
 
-                // Remove all existing tier roles first to ensure they only have one
-                if (tier1Id) await removeRole(updated.discordId, tier1Id);
-                if (tier2Id) await removeRole(updated.discordId, tier2Id);
-                if (tier3Id) await removeRole(updated.discordId, tier3Id);
+                for (const tierRole of tierRoles) {
+                    if (tierRole.discordRoleId) await removeRole(updated.discordId, tierRole.discordRoleId);
+                }
 
-                // Add the selected tier role
-                if (data.tier === 'TIER 1' && tier1Id) {
-                    await addRole(updated.discordId, tier1Id);
-                } else if (data.tier === 'TIER 2' && tier2Id) {
-                    await addRole(updated.discordId, tier2Id);
-                } else if (data.tier === 'TIER 3' && tier3Id) {
-                    await addRole(updated.discordId, tier3Id);
+                if (data.tierRoleId) {
+                    const [selectedTierRole] = await db.select().from(roles).where(eq(roles.id, data.tierRoleId));
+                    if (selectedTierRole?.discordRoleId) await addRole(updated.discordId, selectedTierRole.discordRoleId);
                 }
 
                 // Trigger Discord event embed refresh for active events
@@ -134,20 +154,11 @@ export default async function membersController(fastify: FastifyInstance) {
                         .where(and(eq(eventParticipants.userId, updated.discordId), ne(events.status, 'Closed')));
 
                     if (userEvents.length > 0) {
-                        const TIER_MAP: Record<string, number> = {
-                            'TIER 1': 1,
-                            'TIER 2': 2,
-                            'TIER 3': 3,
-                            'NONE': 4,
-                            'БЕЗ TIER': 4,
-                        };
-
-                        const newTierInt = TIER_MAP[data.tier] || 4;
                         const eventIds = userEvents.map((e) => e.eventId);
 
                         await db
                             .update(eventParticipants)
-                            .set({ tier: newTierInt })
+                            .set({ tierRoleId: data.tierRoleId || null })
                             .where(and(eq(eventParticipants.userId, updated.discordId), inArray(eventParticipants.eventId, eventIds)));
 
                         for (const ev of userEvents) {
@@ -170,7 +181,7 @@ export default async function membersController(fastify: FastifyInstance) {
     });
 
     // POST /api/members/:id/exclude - Exclude member (optionally blacklist)
-    fastify.post('/:id/exclude', { preValidation: checkAdmin }, async (request, reply) => {
+    fastify.post('/:id/exclude', { preHandler: [requireAnyPermission(['site:kicked:actions', 'site:members:actions'])] }, async (request, reply) => {
         try {
             const { id } = request.params as { id: string };
             const { reason, blacklist } = z
@@ -184,29 +195,28 @@ export default async function membersController(fastify: FastifyInstance) {
             if (!member) return reply.status(404).send({ error: 'Member not found' });
 
             // Remove Discord roles
-            const newKingsizeId = await getRoleIdByKey('NEWKINGSIZE');
-            const kingsizeId = await getRoleIdByKey('KINGSIZE');
-            const tier1Id = await getRoleIdByKey('TIER1');
-            const tier2Id = await getRoleIdByKey('TIER2');
-            const tier3Id = await getRoleIdByKey('TIER3');
-
-            if (newKingsizeId) await removeRole(member.discordId, newKingsizeId);
-            if (kingsizeId) await removeRole(member.discordId, kingsizeId);
-            if (tier1Id) await removeRole(member.discordId, tier1Id);
-            if (tier2Id) await removeRole(member.discordId, tier2Id);
-            if (tier3Id) await removeRole(member.discordId, tier3Id);
+            const systemRoles = await db.select().from(roles).where(eq(roles.type, 'system'));
+            for (const systemRole of systemRoles) {
+                if (systemRole.discordRoleId) await removeRole(member.discordId, systemRole.discordRoleId);
+            }
 
             // If blacklisted, add BLACKLIST role
             if (blacklist) {
-                const blacklistRoleId = await getRoleIdByKey('BLACKLIST');
-                if (blacklistRoleId) await addRole(member.discordId, blacklistRoleId);
+                const [blacklistRole] = await db
+                    .select()
+                    .from(roles)
+                    .where(and(eq(roles.type, 'system'), eq(roles.systemType, 'blacklist')));
+                if (blacklistRole?.discordRoleId) await addRole(member.discordId, blacklistRole.discordRoleId);
             }
+
+            // Get admin username
+            const adminUsername = (request as any).user?.username || 'System';
 
             // Update member status
             const newStatus = blacklist ? 'blacklisted' : 'kicked';
             const [excluded] = await db
                 .update(members)
-                .set({ status: newStatus, kickReason: reason, kickedAt: new Date() })
+                .set({ status: newStatus, tierRoleId: null, kickReason: reason, kickedAt: new Date(), kickedByAdminUsername: adminUsername })
                 .where(eq(members.id, id))
                 .returning();
 
@@ -227,7 +237,7 @@ export default async function membersController(fastify: FastifyInstance) {
     });
 
     // POST /api/members/:id/unblacklist - Remove blacklist from member
-    fastify.post('/:id/unblacklist', { preValidation: checkAdmin }, async (request, reply) => {
+    fastify.post('/:id/unblacklist', { preHandler: [requirePermission('site:kicked:actions')] }, async (request, reply) => {
         try {
             const { id } = request.params as { id: string };
 
@@ -237,8 +247,11 @@ export default async function membersController(fastify: FastifyInstance) {
 
             // Unban from Discord server and remove BLACKLIST role
             await unbanMember(member.discordId);
-            const blacklistRoleId = await getRoleIdByKey('BLACKLIST');
-            if (blacklistRoleId) await removeRole(member.discordId, blacklistRoleId);
+            const [blacklistRole] = await db
+                .select()
+                .from(roles)
+                .where(and(eq(roles.type, 'system'), eq(roles.systemType, 'blacklist')));
+            if (blacklistRole?.discordRoleId) await removeRole(member.discordId, blacklistRole.discordRoleId);
 
             // Update member status to kicked (stays excluded, just no longer blacklisted)
             const [updated] = await db.update(members).set({ status: 'kicked' }).where(eq(members.id, id)).returning();

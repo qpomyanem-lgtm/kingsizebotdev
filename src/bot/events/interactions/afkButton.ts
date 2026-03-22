@@ -1,24 +1,15 @@
 import { ButtonInteraction, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 import { db } from '../../../db';
-import { afkEntries, roleSettings } from '../../../db/schema';
+import { afkEntries } from '../../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { refreshAfkEmbed } from '../../lib/afkEmbed';
 import { showModalViaInteractionCallback } from '../../lib/interactionResponses';
+import { hasPermission } from '../../../backend/lib/discordRoles';
 
 export async function handleAfkStartBtn(interaction: ButtonInteraction) {
-    // Check if user has at least one configured role
-    const configuredRoles = await db.select().from(roleSettings);
-    const validRoleIds = configuredRoles.map(r => r.discordRoleId).filter(Boolean) as string[];
-    
-    // member might be partial, ensure roles can be checked
-    const member = interaction.guild?.members.cache.get(interaction.user.id) || await interaction.guild?.members.fetch(interaction.user.id);
-    if (!member) {
-        return interaction.reply({ content: 'Ошибка получения данных пользователя.', ephemeral: true });
-    }
-
-    const hasAnyConfiguredRole = validRoleIds.some(id => member.roles.cache.has(id));
-    if (!hasAnyConfiguredRole) {
-        return interaction.reply({ content: 'У вас нет доступа к системе АФК (требуется настроенная роль).', ephemeral: true });
+    const allowed = await hasPermission(interaction.user.id, 'bot:afk:start');
+    if (!allowed) {
+        return interaction.reply({ content: 'У вас нет доступа к системе АФК.', ephemeral: true });
     }
 
     // Check if user already has an active AFK

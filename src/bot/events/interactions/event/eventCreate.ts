@@ -9,14 +9,14 @@ import {
 import { db } from '../../../../db';
 import { events } from '../../../../db/schema';
 import { v4 as uuidv4 } from 'uuid';
-import { canManageEvents, EVENT_TYPE_LABELS } from './eventShared';
+import { canCreateEvents, EVENT_TYPE_LABELS } from './eventShared';
 import { refreshEventEmbed } from './eventEmbedPayload.js';
 import { showModalViaInteractionCallback } from '../../../lib/interactionResponses';
 
 // ── 1. Create Button → Show Modal with raw Radio Group ─────────
 
 export async function handleEventCreateBtn(interaction: ButtonInteraction) {
-    const allowed = await canManageEvents(interaction.member as GuildMember | null, interaction.user.id);
+    const allowed = await canCreateEvents(interaction.member as GuildMember | null, interaction.user.id);
     if (!allowed) {
         await interaction.reply({ content: 'У вас нет прав для создания списков.', ephemeral: true });
         return;

@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Loader2 } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { Check, Loader2, ClipboardList } from 'lucide-react';
 import { api } from '../lib/api';
+import { cn } from '../lib/utils';
 
 interface FieldConfig {
     key: string;
@@ -14,6 +14,9 @@ interface FieldConfig {
 export function ApplicationSettings() {
     const queryClient = useQueryClient();
     const [localFields, setLocalFields] = useState<FieldConfig[]>([]);
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const latestFieldsRef = useRef<FieldConfig[]>([]);
 
     const { data: fields, isLoading } = useQuery<FieldConfig[]>({
         queryKey: ['application-fields'],
@@ -24,7 +27,10 @@ export function ApplicationSettings() {
     });
 
     useEffect(() => {
-        if (fields) setLocalFields(fields);
+        if (fields) {
+            setLocalFields(fields);
+            latestFieldsRef.current = fields;
+        }
     }, [fields]);
 
     const saveMutation = useMutation({
@@ -36,19 +42,35 @@ export function ApplicationSettings() {
         }
     });
 
+    const scheduleSave = useCallback(() => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+
+        debounceRef.current = setTimeout(async () => {
+            setSaveStatus('saving');
+            try {
+                await saveMutation.mutateAsync(latestFieldsRef.current);
+                setSaveStatus('saved');
+                setTimeout(() => setSaveStatus('idle'), 2000);
+            } catch {
+                setSaveStatus('idle');
+            }
+        }, 1000);
+    }, [saveMutation]);
+
+    useEffect(() => {
+        return () => {
+            if (debounceRef.current) clearTimeout(debounceRef.current);
+        };
+    }, []);
+
     const handleChange = (index: number, field: 'label' | 'placeholder' | 'style', value: string | number) => {
-        setLocalFields(prev => prev.map((f, i) => i === index ? { ...f, [field]: value } : f));
+        setLocalFields(prev => {
+            const next = prev.map((f, i) => i === index ? { ...f, [field]: value } : f);
+            latestFieldsRef.current = next;
+            return next;
+        });
+        scheduleSave();
     };
-
-    const handleSave = () => {
-        saveMutation.mutate(localFields);
-    };
-
-    const hasChanges = fields ? localFields.some((f, i) => 
-        f.label !== fields[i]?.label || 
-        f.placeholder !== fields[i]?.placeholder ||
-        f.style !== fields[i]?.style
-    ) : false;
 
     if (isLoading) {
         return (
@@ -61,50 +83,51 @@ export function ApplicationSettings() {
     return (
         <div className="h-full flex flex-col font-sans">
             <header className="mb-8 flex justify-between items-end">
-                <div>
-                    <h1 className="text-[28px] font-black tracking-tight text-slate-900 mb-2">КОНСТРУКТОР АНКЕТЫ</h1>
-                    <p className="text-slate-500 text-[14px] font-medium tracking-wide">
-                        Настройка полей модального окна подачи заявки в Discord.
-                    </p>
+                <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20 text-white">
+                        <ClipboardList className="w-6 h-6" />
+                    </div>
+                    <div>
+                        <h1 className="text-[28px] font-black tracking-tight text-slate-900 mb-1">КОНСТРУКТОР АНКЕТЫ</h1>
+                        <p className="text-slate-500 text-[14px] font-medium tracking-wide">
+                            Настройка полей модального окна подачи заявки в Discord.
+                        </p>
+                    </div>
                 </div>
-
-                <button
-                    onClick={handleSave}
-                    disabled={!hasChanges || saveMutation.isPending}
-                    className={cn(
-                        "flex items-center gap-2 px-6 py-3 rounded-2xl font-semibold text-[14px] transition-all duration-300 shadow-sm",
-                        hasChanges && !saveMutation.isPending
-                            ? "bg-gradient-to-r from-slate-900 to-slate-800 text-white hover:shadow-[0_4px_16px_rgba(15,23,42,0.2)] hover:-translate-y-0.5"
-                            : "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
-                    )}
-                >
-                    {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    {saveMutation.isPending ? 'Сохранение...' : 'Сохранить изменения'}
-                </button>
+                {saveStatus === 'saving' && (
+                    <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Сохранение...
+                    </span>
+                )}
+                {saveStatus === 'saved' && (
+                    <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
+                        <Check className="h-3.5 w-3.5" /> Сохранено
+                    </span>
+                )}
             </header>
 
             <div className="flex-1 overflow-y-auto pr-2 pb-10 custom-scrollbar space-y-8">
                 <section>
                     <h2 className="text-[11px] font-bold tracking-[0.2em] text-slate-400 uppercase mb-3 px-2">Поля анкеты</h2>
-                    <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
+                    <div className="bg-white rounded-[24px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.02)] overflow-hidden">
                         <table className="w-full text-left">
                             <thead>
                                 <tr className="border-b border-slate-100 bg-slate-50/50">
-                                    <th className="text-[11px] font-bold tracking-wider text-slate-500 uppercase py-3 px-4 w-[60px]">№</th>
-                                    <th className="text-[11px] font-bold tracking-wider text-slate-500 uppercase py-3 px-4 w-[25%]">Тип поля</th>
-                                    <th className="text-[11px] font-bold tracking-wider text-slate-500 uppercase py-3 px-4 w-[35%]">Текст вопроса (Max 45)</th>
-                                    <th className="text-[11px] font-bold tracking-wider text-slate-500 uppercase py-3 px-4">Подсказка в поле (Max 100)</th>
+                                    <th className="text-xs font-semibold tracking-wider text-slate-500 uppercase py-4 px-6 w-[60px]">№</th>
+                                    <th className="text-xs font-semibold tracking-wider text-slate-500 uppercase py-4 px-6 w-[25%]">Тип поля</th>
+                                    <th className="text-xs font-semibold tracking-wider text-slate-500 uppercase py-4 px-6 w-[35%]">Текст вопроса (Max 45)</th>
+                                    <th className="text-xs font-semibold tracking-wider text-slate-500 uppercase py-4 px-6">Подсказка в поле (Max 100)</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {localFields.map((field, index) => (
-                                    <tr key={field.key} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/30 transition-colors">
-                                        <td className="py-3 px-4">
+                                    <tr key={field.key} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
+                                        <td className="py-4 px-6">
                                             <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-500 flex items-center justify-center font-bold text-[13px] shrink-0">
                                                 {index + 1}
                                             </div>
                                         </td>
-                                        <td className="py-3 px-4">
+                                        <td className="py-4 px-6">
                                             <div className="flex bg-slate-100 rounded-lg p-1 w-max">
                                                 <button
                                                     onClick={() => handleChange(index, 'style', 1)}
@@ -126,7 +149,7 @@ export function ApplicationSettings() {
                                                 </button>
                                             </div>
                                         </td>
-                                        <td className="py-3 px-4">
+                                        <td className="py-4 px-6">
                                             <div className="relative">
                                                 <input
                                                     type="text"
@@ -144,7 +167,7 @@ export function ApplicationSettings() {
                                                 </span>
                                             </div>
                                         </td>
-                                        <td className="py-3 px-4">
+                                        <td className="py-4 px-6">
                                             <div className="relative">
                                                 <input
                                                     type="text"

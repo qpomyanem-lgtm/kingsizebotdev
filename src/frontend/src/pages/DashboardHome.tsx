@@ -20,9 +20,16 @@ export function DashboardHome() {
 
   return (
     <div ref={containerRef} className="h-full flex flex-col font-sans">
-      <header className="stagger-item mb-12">
-        <h1 className="text-[28px] font-bold tracking-tight text-slate-900 mb-2">Обзор</h1>
-        <p className="text-slate-500 text-[13px] font-medium tracking-wide">Краткая сводка по серверу Majestic RP.</p>
+      <header className="stagger-item mb-8 flex justify-between items-end">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20 text-white">
+            <Activity className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-[28px] font-black tracking-tight text-slate-900 mb-1">ОБЗОР</h1>
+            <p className="text-slate-500 text-[13px] font-medium tracking-wide">Краткая сводка по серверу Majestic RP.</p>
+          </div>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">

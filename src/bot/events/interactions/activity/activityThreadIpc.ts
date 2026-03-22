@@ -2,10 +2,10 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, Colors, EmbedBuil
 import { randomUUID } from 'crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../../../../db';
-import { activityThreads, members, systemSettings } from '../../../../db/schema';
-import { DM_SESSION_TTL_MS } from './activityShared';
+import { activityScreenshots, activityThreads, members, systemSettings } from '../../../../db/schema';
+import { buildThreadStatusMessage, MAX_SCREENSHOTS, ACTIVITY_DAYS_LIMIT } from './activityShared';
 
-async function ensureActivityThreadAndSendDm(client: Client, memberId: string) {
+async function ensureActivityThreadAndSendDm(client: Client, memberId: string, acceptedByDiscordId?: string) {
     const [member] = await db.select().from(members).where(eq(members.id, memberId)).limit(1);
     if (!member) return { ok: false as const, reason: 'Member not found' as const };
 
@@ -22,17 +22,25 @@ async function ensureActivityThreadAndSendDm(client: Client, memberId: string) {
 
     const threadName = `Активность: ${member.gameNickname} #${member.gameStaticId}`;
 
-    let threadRow = existing;
+    // If a completed thread already exists, remove its screenshots then the thread so a fresh one is created
+    if (existing && existing.status === 'completed') {
+        await db.delete(activityScreenshots).where(eq(activityScreenshots.activityThreadId, existing.id));
+        await db.delete(activityThreads).where(eq(activityThreads.id, existing.id));
+    }
+
+    let threadRow = (!existing || existing.status === 'completed') ? null : existing;
     if (!threadRow) {
         const forumCh = (await client.channels.fetch(forumChannelId).catch(() => null)) as ForumChannel | null;
         if (!forumCh) return { ok: false as const, reason: 'Forum channel not found' as const };
+
+        const statusContent = await buildThreadStatusMessage(memberId, member.discordId, acceptedByDiscordId ?? null, new Date());
 
         const created = await forumCh.threads
             .create({
                 name: threadName,
                 autoArchiveDuration: 1440,
                 message: {
-                    content: 'Здесь размещается активность участника.\n\nИспользуйте кнопку в ЛС для отправки скриншотов.',
+                    content: statusContent,
                 },
             })
             .catch((e: any) => {
@@ -46,6 +54,8 @@ async function ensureActivityThreadAndSendDm(client: Client, memberId: string) {
             discordThreadId: created.id,
             threadName,
             presentInDiscord: true,
+            acceptedByDiscordId: acceptedByDiscordId ?? null,
+            status: 'active',
         });
 
         threadRow = (
@@ -62,21 +72,27 @@ async function ensureActivityThreadAndSendDm(client: Client, memberId: string) {
         const embed = new EmbedBuilder()
             .setTitle('📩 Активность')
             .setDescription(
-                'Нажмите кнопку и отправьте скриншоты вложениями в следующем DM-сообщении. Бот синхронизирует их с тредом и засчитывает на сайте.',
+                `Нажмите кнопку ниже, чтобы прикрепить скриншоты активности.\n\nЛимит: **${MAX_SCREENSHOTS}** скриншотов за **${ACTIVITY_DAYS_LIMIT}** дней.`,
             )
             .setColor(Colors.Blurple);
 
-        const button = new ButtonBuilder().setCustomId(`activity_upload_${memberId}`).setLabel('Прикрепить активность').setStyle(ButtonStyle.Primary);
+        const button = new ButtonBuilder().setCustomId(`activity_upload_${memberId}`).setLabel('📎 Прикрепить скриншот').setStyle(ButtonStyle.Primary);
         const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(button);
 
-        await user.send({ embeds: [embed], components: [actionRow] }).catch(() => null);
+        const dmMsg = await user.send({ embeds: [embed], components: [actionRow] }).catch(() => null);
+
+        if (dmMsg) {
+            // Pin the message
+            await dmMsg.pin().catch(() => null);
+            // Save DM message ID for future updates
+            await db.update(activityThreads).set({ dmMessageId: dmMsg.id }).where(eq(activityThreads.id, threadRow.id));
+        }
     }
 
-    void DM_SESSION_TTL_MS; // keep import stable for now
     return { ok: true as const };
 }
 
-export async function createActivityThreadIpc(client: Client, memberId: string) {
-    return ensureActivityThreadAndSendDm(client, memberId);
+export async function createActivityThreadIpc(client: Client, memberId: string, acceptedByDiscordId?: string) {
+    return ensureActivityThreadAndSendDm(client, memberId, acceptedByDiscordId);
 }
 

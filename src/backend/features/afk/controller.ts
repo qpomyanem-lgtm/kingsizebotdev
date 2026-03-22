@@ -2,11 +2,10 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../../db';
 import { afkEntries } from '../../../db/schema';
 import { eq, desc } from 'drizzle-orm';
-import { lucia } from '../../auth/lucia';
-import { getAdminRoleLabel } from '../../lib/discordRoles';
+import { requirePermission } from '../../lib/discordRoles';
 
 export default async function afkController(server: FastifyInstance) {
-    server.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
+    server.get('/', { preHandler: [requirePermission('site:afk:view')] }, async (request: FastifyRequest, reply: FastifyReply) => {
         try {
             const query = request.query as any;
             const status = query.status as string;
@@ -29,27 +28,12 @@ export default async function afkController(server: FastifyInstance) {
         }
     });
 
-    server.post(
+    server.post<{ Params: { id: string } }>(
         '/:id/end',
-        async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+        { preHandler: [requirePermission('site:afk:actions')] },
+        async (request, reply) => {
             try {
-                const sessionId = lucia.readSessionCookie(request.headers.cookie ?? '');
-                if (!sessionId) {
-                    return reply.status(401).send({ error: 'Unauthorized' });
-                }
-
-                const { session, user } = await lucia.validateSession(sessionId);
-                if (!session || !user) {
-                    return reply.status(401).send({ error: 'Unauthorized' });
-                }
-
-                const adminRoleLabel = await getAdminRoleLabel(user.discordId);
-                const allowedLabels = ['BOT OWNER', 'OWNER', '.', 'DEP', 'HIGH'];
-                if (!adminRoleLabel || !allowedLabels.includes(adminRoleLabel)) {
-                    return reply
-                        .status(403)
-                        .send({ error: 'Forbidden: Insufficient privileges to end AFK' });
-                }
+                const user = (request as any).user;
 
                 const afkId = request.params.id;
                 const [existingAfk] = await db.select().from(afkEntries).where(eq(afkEntries.id, afkId));
@@ -67,7 +51,7 @@ export default async function afkController(server: FastifyInstance) {
                     .set({
                         status: 'ended',
                         endedByType: 'admin',
-                        endedByAdmin: user.username,
+                        endedByAdmin: user?.username || 'Admin',
                         endedAt: new Date(),
                     })
                     .where(eq(afkEntries.id, afkId));

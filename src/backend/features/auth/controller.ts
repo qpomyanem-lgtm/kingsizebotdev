@@ -5,14 +5,14 @@ import { config } from 'dotenv';
 config({ path: '.env' });
 
 import { lucia, createDiscordAuth } from '../../auth/lucia';
-import { getAdminRoleLabel, hasAdminPanelAccess, hasRoleSettingsAccess } from '../../lib/discordRoles';
+import { getAdminRoleLabel, hasAdminPanelAccess, hasPanelAccess, hasRoleSettingsAccess, getUserPermissions, invalidateUserCache } from '../../lib/discordRoles';
 import { db } from '../../../db';
 import { users } from '../../../db/schema';
 import { eq } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 
 // One-time codes for transferring sessions across domains
-const pendingSessionCodes = new Map<string, { sessionId: string; expires: number }>();
+const pendingSessionCodes = new Map<string, { sessionId: string; discordId: string; expires: number }>();
 
 // Cleanup expired codes every 60s
 setInterval(() => {
@@ -136,6 +136,7 @@ export default async function authController(fastify: FastifyInstance) {
             const oneTimeCode = uuid();
             pendingSessionCodes.set(oneTimeCode, {
                 sessionId: session.id,
+                discordId: discordUser.id,
                 expires: Date.now() + 30_000, // 30 seconds
             });
 
@@ -164,6 +165,20 @@ export default async function authController(fastify: FastifyInstance) {
         }
 
         pendingSessionCodes.delete(code);
+
+        // Check panel access with fresh Discord roles (no cache).
+        // This is done here — not in the OAuth callback — to avoid
+        // consuming the Discord OAuth code a second time on retries.
+        const botOwnerId2 = process.env.BOT_OWNER_ID;
+        const isOwner2 = botOwnerId2 && pending.discordId === botOwnerId2.trim();
+        if (!isOwner2) {
+            invalidateUserCache(pending.discordId);
+            const hasAccess = await hasPanelAccess(pending.discordId);
+            if (!hasAccess) {
+                await lucia.invalidateSession(pending.sessionId);
+                return reply.redirect('/login?error=NoPanelAccess');
+            }
+        }
 
         const sessionCookie = lucia.createSessionCookie(pending.sessionId);
         reply.setCookie(sessionCookie.name, sessionCookie.value, sessionCookie.attributes);
@@ -200,19 +215,35 @@ export default async function authController(fastify: FastifyInstance) {
         }
 
         const botOwnerId = process.env.BOT_OWNER_ID;
+        const isOwner = botOwnerId && user.discordId === botOwnerId.trim();
+
+        // Always verify access rights on every /api/auth/me call.
+        // This is the final gatekeeper: even if bot failed to delete the session,
+        // a user without any access roles gets kicked here.
+        if (!isOwner) {
+            const hasAccess = await hasPanelAccess(user.discordId);
+            if (!hasAccess) {
+                await lucia.invalidateSession(session.id);
+                const sessionCookie = lucia.createBlankSessionCookie();
+                reply.setCookie(sessionCookie.name, sessionCookie.value, sessionCookie.attributes);
+                return reply.status(401).send({ error: 'Unauthorized' });
+            }
+        }
+
         let role = user.role;
-        if (botOwnerId && user.discordId === botOwnerId.trim()) {
+        if (isOwner) {
             role = 'owner';
-        } else if (await hasAdminPanelAccess(user.discordId)) {
+        } else {
             role = 'admin';
         }
 
-        const [roleSettingsAccess, roleLabel] = await Promise.all([
+        const [roleSettingsAccess, roleLabel, permissions] = await Promise.all([
             hasRoleSettingsAccess(user.discordId),
             getAdminRoleLabel(user.discordId),
+            getUserPermissions(user.discordId),
         ]);
 
-        reply.send({ user: { ...user, role, roleSettingsAccess, roleLabel } });
+        reply.send({ user: { ...user, role, roleSettingsAccess, roleLabel, permissions } });
     });
 
     fastify.post('/api/auth/logout', async (req: FastifyRequest, reply: FastifyReply) => {

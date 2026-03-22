@@ -1,7 +1,7 @@
 import { config } from 'dotenv';
 import { db } from '../../db';
-import { systemSettings } from '../../db/schema';
-import { eq } from 'drizzle-orm';
+import { roles, systemSettings } from '../../db/schema';
+import { and, asc, eq } from 'drizzle-orm';
 
 config({ path: '.env' });
 
@@ -114,8 +114,66 @@ export async function unbanMember(discordUserId: string): Promise<boolean> {
  * Get Discord role ID by key from role_settings.
  */
 export async function getRoleIdByKey(key: string): Promise<string | null> {
-    const { roleSettings } = await import('../../db/schema.js');
-    const [row] = await db.select().from(roleSettings).where(eq(roleSettings.key, key));
+    const legacyMap: Record<string, string> = {
+        KINGSIZE: 'main',
+        NEWKINGSIZE: 'new',
+        BLACKLIST: 'blacklist',
+    };
+
+    if (key === 'TIER1') return getTierRoleDiscordIdByIndex(0);
+    if (key === 'TIER2') return getTierRoleDiscordIdByIndex(1);
+    if (key === 'TIER3') return getTierRoleDiscordIdByIndex(2);
+
+    const systemType = legacyMap[key];
+    if (!systemType) return null;
+    return getDiscordRoleIdBySystemType(systemType as 'main' | 'new' | 'blacklist');
+}
+
+/**
+ * Get Discord role ID by purpose tag from role_settings.
+ * Purpose values: 'family', 'newbie', 'tier_1', 'tier_2', 'tier_3', 'blacklist'
+ */
+export async function getRoleIdByPurpose(purpose: string): Promise<string | null> {
+    const purposeMap: Record<string, 'main' | 'new' | 'blacklist'> = {
+        family: 'main',
+        newbie: 'new',
+        blacklist: 'blacklist',
+    };
+
+    if (purpose === 'tier_1') return getTierRoleDiscordIdByIndex(0);
+    if (purpose === 'tier_2') return getTierRoleDiscordIdByIndex(1);
+    if (purpose === 'tier_3') return getTierRoleDiscordIdByIndex(2);
+
+    const systemType = purposeMap[purpose];
+    if (!systemType) return null;
+    return getDiscordRoleIdBySystemType(systemType);
+}
+
+/**
+ * Primary lookup for system Discord role IDs in unified `roles` table.
+ */
+export async function getDiscordRoleIdBySystemType(systemType: 'main' | 'new' | 'blacklist'): Promise<string | null> {
+    const [row] = await db
+        .select()
+        .from(roles)
+        .where(and(eq(roles.type, 'system'), eq(roles.systemType, systemType)))
+        .orderBy(asc(roles.priority));
+
+    return row?.discordRoleId?.trim() || null;
+}
+
+/**
+ * Returns tier Discord role ID by index in priority order.
+ * index=0 highest tier (smallest priority), index=1 next, etc.
+ */
+export async function getTierRoleDiscordIdByIndex(index: number): Promise<string | null> {
+    const tierRoles = await db
+        .select()
+        .from(roles)
+        .where(and(eq(roles.type, 'system'), eq(roles.systemType, 'tier')))
+        .orderBy(asc(roles.priority));
+
+    const row = tierRoles[index];
     return row?.discordRoleId?.trim() || null;
 }
 

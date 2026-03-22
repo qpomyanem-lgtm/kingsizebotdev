@@ -1,10 +1,9 @@
 import { FastifyInstance } from 'fastify';
 import { db } from '../../../db';
-import { applications, users, systemSettings, interviewMessages } from '../../../db/schema';
-import { eq, desc, inArray } from 'drizzle-orm';
-import { lucia } from '../../auth/lucia';
+import { applications, users, systemSettings, interviewMessages, roles } from '../../../db/schema';
+import { and, eq, desc, inArray } from 'drizzle-orm';
 import { z } from 'zod';
-import { getAdminRoleIds } from '../../lib/discordRoles';
+import { requirePermission } from '../../lib/discordRoles';
 
 // Add type for user in FastifyRequest
 declare module 'fastify' {
@@ -16,7 +15,7 @@ declare module 'fastify' {
 
 import { members } from '../../../db/schema';
 import { randomUUID } from 'crypto';
-import { addRole, getRoleIdByKey, setNickname } from '../../lib/discordMemberActions.js';
+import { addRole, getRoleIdByPurpose, setNickname } from '../../lib/discordMemberActions.js';
 
 const IPC_BOT_BASE_URL = process.env.IPC_BOT_BASE_URL || 'http://localhost:3001';
 
@@ -33,32 +32,9 @@ const updateStatusSchema = z.object({
 });
 
 export default async function applicationsController(fastify: FastifyInstance) {
-    // Custom check for admin
-    const checkAdmin = async (request: any, reply: any) => {
-        const sessionId = lucia.readSessionCookie(request.headers.cookie ?? '');
-        if (!sessionId) {
-            return reply.status(401).send({ error: 'Unauthorized' });
-        }
-
-        const { session, user } = await lucia.validateSession(sessionId);
-        if (!session) {
-            return reply.status(401).send({ error: 'Unauthorized' });
-        }
-
-        // This is simplified, ideally we check user's current Discord roles
-        // We'll trust the session for now (since sessions are revoked if roles lost)
-        // But ensure they are actually admin.
-        const [dbUser] = await db.select().from(users).where(eq(users.discordId, user.discordId));
-        if (!dbUser) {
-            return reply.status(401).send({ error: 'Unauthorized' });
-        }
-
-        // Attach user to request for further use
-        request.user = dbUser;
-    };
 
     // GET /api/applications - List all applications
-    fastify.get('/', { preValidation: checkAdmin }, async (_request, reply) => {
+    fastify.get('/', { preHandler: [requirePermission('site:applications:view')] }, async (_request, reply) => {
         try {
             const allApplications = await db.select().from(applications).orderBy(desc(applications.createdAt));
             return reply.send(allApplications);
@@ -68,8 +44,43 @@ export default async function applicationsController(fastify: FastifyInstance) {
         }
     });
 
+    // GET /api/applications/archive - Archived applications with member exclusion data
+    fastify.get('/archive', { preHandler: [requirePermission('site:archive:view')] }, async (_request, reply) => {
+        try {
+            const archivedApps = await db
+                .select({
+                    id: applications.id,
+                    discordId: applications.discordId,
+                    discordUsername: applications.discordUsername,
+                    discordAvatarUrl: applications.discordAvatarUrl,
+                    field1: applications.field1,
+                    field2: applications.field2,
+                    field3: applications.field3,
+                    field4: applications.field4,
+                    field5: applications.field5,
+                    status: applications.status,
+                    createdAt: applications.createdAt,
+                    handledByAdminUsername: applications.handledByAdminUsername,
+                    updatedAt: applications.updatedAt,
+                    rejectionReason: applications.rejectionReason,
+                    memberKickReason: members.kickReason,
+                    memberKickedAt: members.kickedAt,
+                    memberKickedByAdminUsername: members.kickedByAdminUsername,
+                    memberStatus: members.status,
+                })
+                .from(applications)
+                .leftJoin(members, eq(members.applicationId, applications.id))
+                .where(inArray(applications.status, ['accepted', 'rejected', 'excluded', 'blacklist']))
+                .orderBy(desc(applications.updatedAt));
+            return reply.send(archivedApps);
+        } catch (error) {
+            console.error('❌ Ошибка получения архива:', error);
+            return reply.status(500).send({ error: 'Internal Server Error' });
+        }
+    });
+
     // PATCH /api/applications/:id/status - Update application status
-    fastify.patch('/:id/status', { preValidation: checkAdmin }, async (request, reply) => {
+    fastify.patch('/:id/status', { preHandler: [requirePermission('site:applications:actions')] }, async (request, reply) => {
         try {
             const { id } = request.params as { id: string };
             const { status, rejectionReason, gameNickname, gameStaticId } = updateStatusSchema.parse(request.body);
@@ -138,6 +149,11 @@ export default async function applicationsController(fastify: FastifyInstance) {
                 let acceptedMemberId: string | null = existingMember?.id ?? null;
 
                 try {
+                    const [newRole] = await db
+                        .select()
+                        .from(roles)
+                        .where(and(eq(roles.type, 'system'), eq(roles.systemType, 'new')));
+
                     let memberId = existingMember?.id;
                     if (!existingMember) {
                         // Create member
@@ -150,8 +166,8 @@ export default async function applicationsController(fastify: FastifyInstance) {
                             discordAvatarUrl: existingApp.discordAvatarUrl,
                             gameNickname: gameNickname!,
                             gameStaticId: gameStaticId!,
-                            role: 'NEWKINGSIZE',
-                            tier: 'NONE',
+                            roleId: newRole?.id || null,
+                            tierRoleId: null,
                             status: 'active',
                             applicationId: existingApp.id,
                         });
@@ -163,8 +179,8 @@ export default async function applicationsController(fastify: FastifyInstance) {
                             .set({
                                 gameNickname: gameNickname!,
                                 gameStaticId: gameStaticId!,
-                                role: 'NEWKINGSIZE',
-                                tier: 'NONE',
+                                roleId: newRole?.id || null,
+                                tierRoleId: null,
                                 status: 'active',
                                 applicationId: existingApp.id,
                             })
@@ -180,13 +196,13 @@ export default async function applicationsController(fastify: FastifyInstance) {
 
                 // Discord Integrations
                 try {
-                    console.log('🔍 [ПРИНЯТИЕ] Поиск ID роли NEWKINGSIZE в настройках...');
-                    const newKingsizeRoleId = await getRoleIdByKey('NEWKINGSIZE');
-                    console.log('🔍 [ПРИНЯТИЕ] ID роли NEWKINGSIZE из БД:', newKingsizeRoleId);
+                    console.log('🔍 [ПРИНЯТИЕ] Поиск ID роли новенького в настройках...');
+                    const newKingsizeRoleId = await getRoleIdByPurpose('newbie');
+                    console.log('🔍 [ПРИНЯТИЕ] ID роли новенького из БД:', newKingsizeRoleId);
 
                     if (newKingsizeRoleId) {
                         console.log(
-                            '⚙️ [ПРИНЯТИЕ] Вызов addRole для пользователя',
+                            '⚙️ [ПРИНЯТИЕ] Выдача роли новенького пользователю',
                             existingApp.discordId,
                             'с ролью',
                             newKingsizeRoleId,
@@ -194,7 +210,7 @@ export default async function applicationsController(fastify: FastifyInstance) {
                         const roleResult = await addRole(existingApp.discordId, newKingsizeRoleId);
                         console.log('✅ [ПРИНЯТИЕ] Результат addRole:', roleResult);
                     } else {
-                        console.warn('⚠️ [ПРИНЯТИЕ] ВНИМАНИЕ: ID роли NEWKINGSIZE пуст в настройках!');
+                        console.warn('⚠️ [ПРИНЯТИЕ] ВНИМАНИЕ: ID роли новенького пуст в настройках!');
                     }
 
                     const newNick = `${gameNickname} | ${gameStaticId}`;
@@ -275,7 +291,7 @@ export default async function applicationsController(fastify: FastifyInstance) {
     });
 
     // PATCH /api/applications/fields - Update field labels + placeholders + styles (admin only)
-    fastify.patch('/fields', { preValidation: checkAdmin }, async (request, reply) => {
+    fastify.patch('/fields', { preHandler: [requirePermission('site:application_settings:actions')] }, async (request, reply) => {
         try {
             const body = request.body as { fields: Array<{ key: string; label: string; placeholder?: string; style?: number }> };
             if (!body?.fields || !Array.isArray(body.fields)) {
@@ -322,7 +338,7 @@ export default async function applicationsController(fastify: FastifyInstance) {
     });
 
     // GET /api/applications/:id/messages - Get chat history
-    fastify.get('/:id/messages', { preValidation: checkAdmin }, async (request, reply) => {
+    fastify.get('/:id/messages', { preHandler: [requirePermission('site:applications:view')] }, async (request, reply) => {
         try {
             const { id } = request.params as { id: string };
             const msgs = await db
@@ -337,7 +353,7 @@ export default async function applicationsController(fastify: FastifyInstance) {
     });
 
     // POST /api/applications/:id/messages - Admin sends a chat message
-    fastify.post('/:id/messages', { preValidation: checkAdmin }, async (request, reply) => {
+    fastify.post('/:id/messages', { preHandler: [requirePermission('site:applications:actions')] }, async (request, reply) => {
         try {
             const { id } = request.params as { id: string };
             const body = request.body as { content: string };

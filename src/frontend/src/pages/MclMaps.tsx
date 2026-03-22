@@ -65,11 +65,16 @@ export function MclMaps() {
   return (
     <div className="h-full flex flex-col font-sans">
       <header className="mb-8 flex justify-between items-end">
-        <div>
-          <h1 className="text-[28px] font-black tracking-tight text-slate-900 mb-2">КАРТЫ MCL ВЗЗ</h1>
-          <p className="text-slate-500 text-[14px] font-medium tracking-wide">
-            Управление картами для мероприятий MCL и ВЗЗ.
-          </p>
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20 text-white">
+            <Map className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-[28px] font-black tracking-tight text-slate-900 mb-1">КАРТЫ MCL ВЗЗ</h1>
+            <p className="text-slate-500 text-[14px] font-medium tracking-wide">
+              Управление картами для MCL и ВЗЗ.
+            </p>
+          </div>
         </div>
       </header>
 
@@ -84,7 +89,7 @@ export function MclMaps() {
       )}
 
       {/* Add form */}
-      <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-6 mb-6">
+      <div className="bg-white rounded-[24px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.02)] p-6 mb-6">
         <h2 className="text-[11px] font-bold tracking-[0.2em] text-slate-400 uppercase mb-4">Добавить карту</h2>
         <div className="flex gap-3 items-end">
           <div className="flex-1 max-w-[280px]">
@@ -132,7 +137,7 @@ export function MclMaps() {
         <h2 className="text-[11px] font-bold tracking-[0.2em] text-slate-400 uppercase mb-3 px-2">
           Список карт ({maps.length})
         </h2>
-        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-[24px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.02)] overflow-hidden">
           {isLoading ? (
             <div className="p-12 flex items-center justify-center">
               <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
@@ -146,22 +151,22 @@ export function MclMaps() {
             <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/50">
-                  <th className="text-[11px] font-bold tracking-wider text-slate-500 uppercase py-3 px-4 w-[60px]">
+                  <th className="text-xs font-semibold tracking-wider text-slate-500 uppercase py-4 px-6 w-[60px]">
                     Превью
                   </th>
-                  <th className="text-[11px] font-bold tracking-wider text-slate-500 uppercase py-3 px-4">
+                  <th className="text-xs font-semibold tracking-wider text-slate-500 uppercase py-4 px-6">
                     Название
                   </th>
-                  <th className="text-[11px] font-bold tracking-wider text-slate-500 uppercase py-3 px-4">
+                  <th className="text-xs font-semibold tracking-wider text-slate-500 uppercase py-4 px-6">
                     Ссылка
                   </th>
-                  <th className="text-[11px] font-bold tracking-wider text-slate-500 uppercase py-3 px-4 w-[60px]"></th>
+                  <th className="text-xs font-semibold tracking-wider text-slate-500 uppercase py-4 px-6 w-[60px]"></th>
                 </tr>
               </thead>
               <tbody>
                 {maps.map((map) => (
-                  <tr key={map.id} className="border-b border-slate-100 hover:bg-slate-50/30 transition-colors">
-                    <td className="py-3 px-4">
+                  <tr key={map.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
+                    <td className="py-4 px-6">
                       <div className="w-10 h-10 rounded-lg overflow-hidden bg-slate-100 flex items-center justify-center">
                         <img
                           src={map.imageUrl}
@@ -174,10 +179,10 @@ export function MclMaps() {
                         />
                       </div>
                     </td>
-                    <td className="py-3 px-4">
+                    <td className="py-4 px-6">
                       <span className="font-semibold text-[13px] text-slate-800">{map.name}</span>
                     </td>
-                    <td className="py-3 px-4">
+                    <td className="py-4 px-6">
                       <a
                         href={map.imageUrl}
                         target="_blank"
@@ -188,7 +193,7 @@ export function MclMaps() {
                         <span className="truncate">{map.imageUrl}</span>
                       </a>
                     </td>
-                    <td className="py-3 px-4">
+                    <td className="py-4 px-6">
                       <button
                         onClick={() => deleteMutation.mutate(map.id)}
                         disabled={deleteMutation.isPending}

@@ -1,9 +1,9 @@
 import { Client, Events, AuditLogEvent } from 'discord.js';
 import { randomUUID } from 'crypto';
-import { getAdminRoleIds } from '../../backend/lib/discordRoles';
-import { addRole, getRoleIdByKey } from '../../backend/lib/discordMemberActions.js';
+import { getAdminRoleIds, getAllAccessRoleIds } from '../../backend/lib/discordRoles';
+import { addRole, getRoleIdByPurpose } from '../../backend/lib/discordMemberActions.js';
 import { db } from '../../db';
-import { users, sessions, members, events, eventParticipants, applications, interviewMessages, activityThreads, activityScreenshots } from '../../db/schema';
+import { users, sessions, members, events, eventParticipants, applications, interviewMessages, activityThreads, activityScreenshots, roles } from '../../db/schema';
 import { count, eq, and, lte, ne, inArray, desc } from 'drizzle-orm';
 import { handleTicketApplyBtn } from '../events/interactions/ticketButton.js';
 import { handleTicketApplyModal } from '../events/interactions/ticketModalSubmit.js';
@@ -13,7 +13,7 @@ import { checkExpiredAfks } from '../lib/afkEmbed.js';
 import { refreshServerOnlineEmbed } from '../lib/serverStatusEmbed.js';
 import { handleEventCreateBtn, handleEventCreateModalSubmit, handleEventActionBtn, handleEventSetGroupModalSubmit, handleEventMapModalSubmit, refreshEventEmbed } from '../events/interactions/eventInteractions.js';
 import { handleInterviewReadyBtn } from '../events/interactions/interviewReady.js';
-import { createActivityThreadIpc, handleActivityDmMessage, handleActivityForumMessage, handleActivityUploadBtn, rebuildActivityFromForum } from '../events/interactions/activityInteractions.js';
+import { createActivityThreadIpc, handleActivityForumMessage, handleActivityUploadBtn, handleActivityModalSubmit, handleActivityReaction, rebuildActivityFromForum, closeActivityThread, isActivityExpired } from '../events/interactions/activityInteractions.js';
 import { checkAndDeployEmbeds } from '../lib/embedDeployer.js';
 import { systemSettings } from '../../db/schema';
 
@@ -222,26 +222,32 @@ export async function loadEvents(client: Client) {
         }
     });
 
-    // Auto-terminate sessions when admin role is removed
+    // Auto-terminate sessions when access role is removed
     client.on('guildMemberUpdate', async (oldMember, newMember) => {
-        const oldRoles = new Set(oldMember.roles.cache.map(r => r.id));
+        // NOTE: oldMember.roles.cache may be empty when the member was not previously cached (partial).
+        // Therefore we always check the newMember's CURRENT roles against the access role list,
+        // rather than comparing old vs new. If the user has no access roles but has active sessions,
+        // those sessions are revoked.
         const newRoles = new Set(newMember.roles.cache.map(r => r.id));
-        const removedRoles = [...oldRoles].filter(id => !newRoles.has(id));
+        const oldRoles = oldMember.partial ? null : new Set(oldMember.roles.cache.map(r => r.id));
 
-        // --- 1. Auto-terminate sessions when admin role is removed ---
+        // --- 1. Auto-terminate sessions when any access role is removed ---
         try {
-            if (removedRoles.length > 0) {
-                const adminRoleIds = await getAdminRoleIds();
-                const lostAdminRole = adminRoleIds.length > 0 && removedRoles.some(id => adminRoleIds.includes(id));
-                const stillHasAdmin = adminRoleIds.some(id => newRoles.has(id));
-                const botOwnerId = process.env.BOT_OWNER_ID;
+            const botOwnerId = process.env.BOT_OWNER_ID;
+            if (!botOwnerId || newMember.id !== botOwnerId.trim()) {
+                const allAccessRoleIds = await getAllAccessRoleIds();
+                if (allAccessRoleIds.length > 0) {
+                    const stillHasAccess = allAccessRoleIds.some(id => newRoles.has(id));
 
-                if (lostAdminRole && !stillHasAdmin && (!botOwnerId || newMember.id !== botOwnerId.trim())) {
-                    // Invalidate all sessions for this user
-                    const [user] = await db.select().from(users).where(eq(users.discordId, newMember.id));
-                    if (user) {
-                        await db.delete(sessions).where(eq(sessions.userId, user.id));
-                        console.log(`🔒 Отозваны все сессии для ${newMember.user.tag} (${newMember.id}) — утеряна роль администратора`);
+                    // Optimization: if oldMember is not partial, skip DB check when no access role was removed
+                    const hadAccessBefore = oldRoles !== null ? allAccessRoleIds.some(id => oldRoles.has(id)) : true;
+
+                    if (!stillHasAccess && hadAccessBefore) {
+                        const [user] = await db.select().from(users).where(eq(users.discordId, newMember.id));
+                        if (user) {
+                            await db.delete(sessions).where(eq(sessions.userId, user.id));
+                            console.log(`🔒 Отозваны все сессии для ${newMember.user.tag} (${newMember.id}) — нет ролей доступа`);
+                        }
                     }
                 }
             }
@@ -251,34 +257,82 @@ export async function loadEvents(client: Client) {
 
         // --- 2. Auto-sync roster when KINGSIZE, NEWKINGSIZE, or TIER roles are changed ---
         try {
-            const kingsizeId = await getRoleIdByKey('KINGSIZE');
-            const newKingsizeId = await getRoleIdByKey('NEWKINGSIZE');
-            const tier1Id = await getRoleIdByKey('TIER1');
-            const tier2Id = await getRoleIdByKey('TIER2');
-            const tier3Id = await getRoleIdByKey('TIER3');
+            const systemRoles = await db.select().from(roles);
+            const mainRoleRow = systemRoles.find(r => r.type === 'system' && r.systemType === 'main');
+            const newRoleRow = systemRoles.find(r => r.type === 'system' && r.systemType === 'new');
+            const tierRoleRows = systemRoles
+                .filter(r => r.type === 'system' && r.systemType === 'tier')
+                .sort((a, b) => a.priority - b.priority);
 
-            const hasKingsizeNow = kingsizeId ? newRoles.has(kingsizeId) : false;
-            const hasNewKingsizeNow = newKingsizeId ? newRoles.has(newKingsizeId) : false;
-            const hasKingsizeBefore = kingsizeId ? oldRoles.has(kingsizeId) : false;
-            const hasNewKingsizeBefore = newKingsizeId ? oldRoles.has(newKingsizeId) : false;
-            
-            const hasTier1Now = tier1Id ? newRoles.has(tier1Id) : false;
-            const hasTier2Now = tier2Id ? newRoles.has(tier2Id) : false;
-            const hasTier3Now = tier3Id ? newRoles.has(tier3Id) : false;
+            const kingsizeDiscordId = mainRoleRow?.discordRoleId?.trim() || null;
+            const newKingsizeDiscordId = newRoleRow?.discordRoleId?.trim() || null;
 
-            let currentTierValue: 'TIER 1' | 'TIER 2' | 'TIER 3' | 'NONE' = 'NONE';
-            if (hasTier1Now) currentTierValue = 'TIER 1';
-            else if (hasTier2Now) currentTierValue = 'TIER 2';
-            else if (hasTier3Now) currentTierValue = 'TIER 3';
+            const hasKingsizeNow = kingsizeDiscordId ? newRoles.has(kingsizeDiscordId) : false;
+            const hasNewKingsizeNow = newKingsizeDiscordId ? newRoles.has(newKingsizeDiscordId) : false;
+            // When oldMember is partial, we don't know what roles they had before.
+            // Use false as fallback so role-gain actions (thread creation) still trigger,
+            // but guard role-loss actions separately.
+            const isPartial = oldRoles === null;
+            const hasKingsizeBefore = kingsizeDiscordId ? (oldRoles?.has(kingsizeDiscordId) ?? false) : false;
+            const hasNewKingsizeBefore = newKingsizeDiscordId ? (oldRoles?.has(newKingsizeDiscordId) ?? false) : false;
+
+            // Close activity thread when member gets Main role OR loses New role
+            const gainedMain = hasKingsizeNow && !hasKingsizeBefore && !isPartial;
+            const lostNew = !hasNewKingsizeNow && hasNewKingsizeBefore && !isPartial;
+            if (gainedMain || lostNew) {
+                try {
+                    const [existingMember] = await db.select().from(members).where(eq(members.discordId, newMember.id));
+                    if (existingMember) {
+                        const [thread] = await db.select().from(activityThreads).where(and(eq(activityThreads.memberId, existingMember.id), eq(activityThreads.status, 'active'))).limit(1);
+                        if (thread) {
+                            await closeActivityThread(client, thread);
+                            console.log(`✅ Активность закрыта для ${newMember.user.tag} — ${gainedMain ? 'получена роль Main' : 'снята роль New'}`);
+                        }
+                    }
+                } catch (e) {
+                    console.error('❌ Ошибка закрытия активности:', e);
+                }
+            }
+
+            // Determine who assigned the New role (from audit log)
+            let roleAssignerDiscordId: string | null = null;
+
+            if (hasNewKingsizeNow && !hasNewKingsizeBefore) {
+                try {
+                    const auditLogs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 10 }).catch(() => null);
+                    if (auditLogs) {
+                        // Find the most recent role update for this user within 30 seconds
+                        for (const entry of auditLogs.entries.values()) {
+                            if (entry.targetId !== newMember.id) continue;
+                            if (Date.now() - entry.createdTimestamp > 30_000) continue;
+                            // Check if the New role was added in this entry
+                            const addedRoles = entry.changes?.find(c => c.key === '$add');
+                            const rolesAdded = (addedRoles?.new as any[]) ?? [];
+                            const newRoleAdded = rolesAdded.some((r: any) => r.id === newKingsizeDiscordId);
+                            if (newRoleAdded && entry.executorId && entry.executorId !== client.user?.id) {
+                                roleAssignerDiscordId = entry.executorId;
+                                break;
+                            }
+                        }
+                    }
+                } catch { /* ignore audit log errors */ }
+            }
+
+            // Dynamic tier detection: find the highest-priority tier role the user has
+            let currentTierRoleId: string | null = null;
+            for (const tierRole of tierRoleRows) {
+                const discordId = tierRole.discordRoleId?.trim();
+                if (discordId && newRoles.has(discordId)) {
+                    currentTierRoleId = tierRole.id;
+                    break; // tierRoleRows sorted by priority asc, first match = highest tier
+                }
+            }
+
+            const currentRoleId = hasKingsizeNow ? (mainRoleRow?.id || null) : (newRoleRow?.id || null);
 
             const [existing] = await db.select().from(members).where(eq(members.discordId, newMember.id));
 
             if (hasKingsizeNow || hasNewKingsizeNow) {
-                let roleValue: 'KINGSIZE' | 'NEWKINGSIZE' = hasKingsizeNow ? 'KINGSIZE' : 'NEWKINGSIZE';
-                const isInFamilyNow = hasKingsizeNow || hasNewKingsizeNow;
-                const wasInFamilyBefore = hasKingsizeBefore || hasNewKingsizeBefore;
-                const shouldEnsureActivity = isInFamilyNow && !wasInFamilyBefore;
-
                 if (!existing) {
                     const newMemberId = randomUUID();
                     await db.insert(members).values({
@@ -288,43 +342,30 @@ export async function loadEvents(client: Client) {
                         discordAvatarUrl: newMember.user.displayAvatarURL(),
                         gameNickname: newMember.nickname || newMember.user.globalName || newMember.user.username,
                         gameStaticId: '0000',
-                        role: roleValue,
-                        tier: currentTierValue,
+                        roleId: currentRoleId,
+                        tierRoleId: currentTierRoleId,
                         status: 'active'
                     });
-                    console.log(`📋 Автоматически добавлен ${newMember.user.tag} в состав семьи (роль: ${roleValue}, тир: ${currentTierValue})`);
-
-                    if (shouldEnsureActivity) {
-                        createActivityThreadIpc(client, newMemberId).catch(console.error);
-                    }
+                    console.log(`📋 Автоматически добавлен ${newMember.user.tag} в состав семьи`);
                 } else {
                     const needsStatusUpdate = existing.status !== 'active';
-                    const needsRoleUpdate = existing.role !== roleValue;
-                    const needsTierUpdate = existing.tier !== currentTierValue;
+                    const needsRoleUpdate = existing.roleId !== currentRoleId;
+                    const needsTierUpdate = existing.tierRoleId !== currentTierRoleId;
                     
                     if (needsStatusUpdate || needsRoleUpdate || needsTierUpdate) {
                         await db.update(members)
                             .set({ 
                                 status: 'active',
-                                role: roleValue,
-                                tier: currentTierValue,
+                                roleId: currentRoleId,
+                                tierRoleId: currentTierRoleId,
                                 discordUsername: newMember.user.username,
                                 discordAvatarUrl: newMember.user.displayAvatarURL()
                             })
                             .where(eq(members.discordId, newMember.id));
-                        console.log(`🔄 Автоматически обновлен ${newMember.user.tag} в составе семьи (роль: ${roleValue}, тир: ${currentTierValue})`);
-
-                    if (shouldEnsureActivity) {
-                        createActivityThreadIpc(client, existing.id).catch(console.error);
-                    }
+                        console.log(`🔄 Автоматически обновлен ${newMember.user.tag} в составе семьи`);
 
                         if (needsTierUpdate) {
                             try {
-                                const TIER_MAP: Record<string, number> = {
-                                    'TIER 1': 1, 'TIER 2': 2, 'TIER 3': 3, 'NONE': 4, 'БЕЗ TIER': 4
-                                };
-                                const newTierInt = TIER_MAP[currentTierValue] || 4;
-            
                                 const userEvents = await db.select({ eventId: eventParticipants.eventId })
                                     .from(eventParticipants)
                                     .innerJoin(events, eq(events.id, eventParticipants.eventId))
@@ -338,7 +379,7 @@ export async function loadEvents(client: Client) {
                                 if (userEvents.length > 0) {
                                     const eventIds = userEvents.map(e => e.eventId);
                                     await db.update(eventParticipants)
-                                        .set({ tier: newTierInt })
+                                        .set({ tierRoleId: currentTierRoleId })
                                         .where(
                                             and(
                                                 eq(eventParticipants.userId, newMember.id),
@@ -357,12 +398,31 @@ export async function loadEvents(client: Client) {
                         }
                     }
                 }
-            } else {
-                // User DOES NOT have KINGSIZE or NEWKINGSIZE.
+
+                // Create activity thread when New role was just assigned (after member is ensured in DB)
+                if (hasNewKingsizeNow && !hasNewKingsizeBefore) {
+                    try {
+                        const memberId = existing?.id ?? (await db.select().from(members).where(eq(members.discordId, newMember.id)).limit(1))[0]?.id;
+                        if (memberId) {
+                            const [activeThread] = await db.select().from(activityThreads).where(and(eq(activityThreads.memberId, memberId), eq(activityThreads.status, 'active'))).limit(1);
+                            if (activeThread) {
+                                // Close stale thread before creating a new one
+                                await closeActivityThread(client, activeThread);
+                                console.log(`🔄 Закрыт предыдущий тред активности для ${newMember.user.tag}`);
+                            }
+                            await createActivityThreadIpc(client, memberId, roleAssignerDiscordId ?? undefined);
+                            console.log(`📋 Создание треда активности для ${newMember.user.tag} — получена роль New (принял: ${roleAssignerDiscordId ?? 'неизвестно'})`);
+                        }
+                    } catch (e) {
+                        console.error('❌ Ошибка создания активности при выдаче New:', e);
+                    }
+                }
+            } else if (!isPartial) {
+                // User DOES NOT have KINGSIZE or NEWKINGSIZE (and we know their old roles).
                 // If they exist and are active, we must "kick" them.
                 if (existing && existing.status === 'active') {
                     await db.update(members)
-                        .set({ status: 'kicked', tier: 'NONE', kickReason: 'Утеряна роль семьи', kickedAt: new Date() })
+                        .set({ status: 'kicked', tierRoleId: null, kickReason: 'Утеряна роль семьи', kickedAt: new Date() })
                         .where(eq(members.id, existing.id));
                     console.log(`👢 Автоматически исключен ${newMember.user.tag} из состава семьи (утеряна основная роль)`);
                 }
@@ -378,7 +438,7 @@ export async function loadEvents(client: Client) {
             const [dbMember] = await db.select().from(members).where(eq(members.discordId, member.id));
             if (!dbMember || dbMember.status !== 'blacklisted') return;
 
-            const blacklistRoleId = await getRoleIdByKey('BLACKLIST');
+            const blacklistRoleId = await getRoleIdByPurpose('blacklist');
             if (blacklistRoleId) {
                 await addRole(member.id, blacklistRoleId);
                 console.log(`⛔ Автоматически восстановлена роль BLACKLIST для ${member.user.tag} (${member.id})`);
@@ -429,7 +489,7 @@ export async function loadEvents(client: Client) {
             }
 
             await db.update(members)
-                .set({ status: 'kicked', tier: 'NONE', kickReason, kickedAt: new Date() })
+                .set({ status: 'kicked', tierRoleId: null, kickReason, kickedAt: new Date() })
                 .where(eq(members.id, dbMember.id));
 
             // Update linked application status
@@ -460,7 +520,7 @@ export async function loadEvents(client: Client) {
             }
 
             await db.update(members)
-                .set({ status: 'blacklisted', tier: 'NONE', kickReason: banReason, kickedAt: new Date() })
+                .set({ status: 'blacklisted', tierRoleId: null, kickReason: banReason, kickedAt: new Date() })
                 .where(eq(members.id, dbMember.id));
 
             // Update linked application status
@@ -474,18 +534,44 @@ export async function loadEvents(client: Client) {
         }
     });
 
+    // Handle reactions on activity thread messages (✅ approve, ❌ reject)
+    client.on('messageReactionAdd', async (reaction, user) => {
+        try {
+            if (user.bot) return;
+            // Fetch partial reaction/message if needed
+            if (reaction.partial) {
+                try { await reaction.fetch(); } catch { return; }
+            }
+            if (reaction.message.partial) {
+                try { await reaction.message.fetch(); } catch { return; }
+            }
+            await handleActivityReaction(client, reaction as any, user as any);
+        } catch (e) {
+            console.error('❌ Ошибка handleActivityReaction:', e);
+        }
+    });
+
+    // Check for expired activity threads (7-day limit)
+    setInterval(async () => {
+        if (bgJobsDisabled) return;
+        try {
+            const activeThreads = await db.select().from(activityThreads).where(eq(activityThreads.status, 'active'));
+            for (const thread of activeThreads) {
+                if (isActivityExpired(thread.createdAt)) {
+                    await closeActivityThread(client, thread);
+                    console.log(`⏰ Активность закрыта по истечении 7 дней: ${thread.threadName}`);
+                }
+            }
+        } catch (e) {
+            console.error('❌ Ошибка проверки истечения активности:', e);
+        }
+    }, 60_000);
+
     client.on('messageCreate', async (message) => {
         if (message.author.bot) return;
         if (message.guildId) return; // Only process DMs
 
         try {
-            // Activity uploads have priority over interview DM handling.
-            try {
-                const handled = await handleActivityDmMessage(client, message as any);
-                if (handled) return;
-            } catch (e) {
-                console.error('❌ Ошибка handleActivityDmMessage:', e);
-            }
 
             const debugDm = process.env.DEBUG_DM_MESSAGES === '1';
 
@@ -554,6 +640,20 @@ export async function loadEvents(client: Client) {
         }
     });
 
+    // Cache raw modal data because discord.js doesn't expose resolved attachments on ModalSubmitInteraction
+    const activityModalRawCache = new Map<string, { resolved: any; components: any[] }>();
+    client.on('raw', (packet: any) => {
+        if (packet.t === 'INTERACTION_CREATE' && packet.d?.type === 5 && packet.d?.data?.custom_id?.startsWith('activity_modal_')) {
+            const data = packet.d.data;
+            activityModalRawCache.set(data.custom_id, {
+                resolved: data.resolved ?? {},
+                components: data.components ?? [],
+            });
+            // Auto-clean after 60s
+            setTimeout(() => activityModalRawCache.delete(data.custom_id), 60_000);
+        }
+    });
+
     client.on('interactionCreate', async (interaction) => {
         // Guild lock: ignore interactions from unauthorized servers
         const allowed = (client as any)._allowedGuildId;
@@ -601,6 +701,10 @@ export async function loadEvents(client: Client) {
                 await handleEventSetGroupModalSubmit(interaction).catch(console.error);
             } else if (interaction.customId.startsWith('event_map_modal_')) {
                 await handleEventMapModalSubmit(interaction).catch(console.error);
+            } else if (interaction.customId.startsWith('activity_modal_')) {
+                const rawData = activityModalRawCache.get(interaction.customId);
+                activityModalRawCache.delete(interaction.customId);
+                await handleActivityModalSubmit(client, interaction, rawData).catch(console.error);
             }
         }
     });

@@ -1,9 +1,10 @@
 import { and, count, eq, gt, isNull } from 'drizzle-orm';
 import { db } from '../../../../db';
 import { activityDmSessions, activityScreenshots, activityThreads, members } from '../../../../db/schema';
-import { Message } from 'discord.js';
+import { Client, Message } from 'discord.js';
 
 export const MAX_SCREENSHOTS = 30;
+export const ACTIVITY_DAYS_LIMIT = 7;
 export const DM_SESSION_TTL_MS = 10 * 60_000; // 10 min
 
 export function isImageAttachment(att: any) {
@@ -92,5 +93,114 @@ export async function ensureActivityThreadPresentInDb(memberId: string, threadRo
     // Keep for potential reuse; no-op placeholder (not used in current refactor).
     void memberId;
     void threadRow;
+}
+
+export function isActivityExpired(createdAt: Date): boolean {
+    const now = Date.now();
+    const elapsed = now - createdAt.getTime();
+    return elapsed >= ACTIVITY_DAYS_LIMIT * 24 * 60 * 60 * 1000;
+}
+
+export function getElapsedDays(createdAt: Date): number {
+    const now = Date.now();
+    const elapsed = now - createdAt.getTime();
+    return Math.min(Math.floor(elapsed / (24 * 60 * 60 * 1000)), ACTIVITY_DAYS_LIMIT);
+}
+
+export async function countApprovedScreenshots(memberId: string) {
+    const [row] = await db
+        .select({ c: count(activityScreenshots.id) })
+        .from(activityScreenshots)
+        .where(and(eq(activityScreenshots.memberId, memberId), eq(activityScreenshots.screenshotStatus, 'approved')));
+    return Number(row?.c ?? 0);
+}
+
+export async function countPendingScreenshots(memberId: string) {
+    const [row] = await db
+        .select({ c: count(activityScreenshots.id) })
+        .from(activityScreenshots)
+        .where(and(eq(activityScreenshots.memberId, memberId), eq(activityScreenshots.screenshotStatus, 'pending')));
+    return Number(row?.c ?? 0);
+}
+
+export async function buildThreadStatusMessage(memberId: string, memberDiscordId: string, acceptedByDiscordId: string | null, createdAt: Date) {
+    const approvedCount = await countApprovedScreenshots(memberId);
+    const pendingCount = await countPendingScreenshots(memberId);
+    const elapsedDays = getElapsedDays(createdAt);
+
+    const pendingText = pendingCount > 0 ? ` (неподтверждённых: ${pendingCount})` : '';
+    const acceptedTag = acceptedByDiscordId ? `<@${acceptedByDiscordId}>` : 'не указан';
+
+    return `👤 Участник: <@${memberDiscordId}>\n📸 Скриншоты: ${approvedCount}/${MAX_SCREENSHOTS}${pendingText}\n📅 Дней прошло: ${elapsedDays}/${ACTIVITY_DAYS_LIMIT}\n✅ Принял: ${acceptedTag}`;
+}
+
+export async function updateThreadMessage(client: Client, threadRow: any, memberId: string, memberDiscordId: string) {
+    try {
+        const threadChannel = await client.channels.fetch(threadRow.discordThreadId).catch(() => null) as any;
+        if (!threadChannel) return;
+
+        const messages = await threadChannel.messages.fetch({ limit: 5, after: '0' }).catch(() => null);
+        if (!messages) return;
+
+        // Find the first bot message (the status message)
+        const botMessage = messages.find((m: any) => m.author?.id === client.user?.id && !m.embeds?.length && m.content?.includes('Участник'));
+        if (!botMessage) return;
+
+        const content = await buildThreadStatusMessage(memberId, memberDiscordId, threadRow.acceptedByDiscordId, threadRow.createdAt);
+        await botMessage.edit({ content }).catch(() => null);
+    } catch {
+        // ignore errors
+    }
+}
+
+export async function closeActivityThread(client: Client, threadRow: any) {
+    try {
+        await db.update(activityThreads).set({ status: 'completed' }).where(eq(activityThreads.id, threadRow.id));
+
+        const threadChannel = await client.channels.fetch(threadRow.discordThreadId).catch(() => null) as any;
+        if (threadChannel) {
+            // Lock and archive atomically — lock first, then archive
+            await threadChannel.edit({ locked: true, archived: true }).catch(() => null);
+        }
+
+        // Disable DM button
+        await disableDmButton(client, threadRow);
+
+        await triggerSiteRefresh();
+    } catch {
+        // ignore
+    }
+}
+
+export async function closeActivityByMemberId(client: Client, memberId: string) {
+    const [thread] = await db.select().from(activityThreads).where(and(eq(activityThreads.memberId, memberId), eq(activityThreads.status, 'active'))).limit(1);
+    if (thread) {
+        await closeActivityThread(client, thread);
+    }
+}
+
+export async function disableDmButton(client: Client, threadRow: any) {
+    if (!threadRow.dmMessageId) return;
+    try {
+        const [member] = await db.select().from(members).where(eq(members.id, threadRow.memberId)).limit(1);
+        if (!member) return;
+        const user = await client.users.fetch(member.discordId).catch(() => null);
+        if (!user) return;
+        const dm = await user.createDM().catch(() => null);
+        if (!dm) return;
+        const msg = await dm.messages.fetch(threadRow.dmMessageId).catch(() => null);
+        if (!msg) return;
+
+        const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import('discord.js');
+        const disabledButton = new ButtonBuilder()
+            .setCustomId(`activity_upload_${threadRow.memberId}`)
+            .setLabel('Активность завершена')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(true);
+        const row = new ActionRowBuilder<typeof disabledButton>().addComponents(disabledButton);
+        await msg.edit({ components: [row] }).catch(() => null);
+    } catch {
+        // ignore
+    }
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { io, Socket } from 'socket.io-client';
-import { Eye, Link as LinkIcon, Loader2, Users, Image as ImageIcon } from 'lucide-react';
+import { Eye, Link as LinkIcon, Loader2, Users, Image as ImageIcon, Search, Check, X, Square } from 'lucide-react';
 import { api } from '../lib/api';
 import { cn } from '../lib/utils';
 import { formatMoscowDate } from '../lib/time';
@@ -19,8 +19,16 @@ type ActivityOverviewRow = {
 
   joinedAt: string;
   screenshotsCount: number;
+  approvedCount: number;
+  pendingCount: number;
   screenshotsMax: number;
   forumUrl: string | null;
+
+  threadStatus: 'active' | 'completed';
+  acceptedByDiscordId: string | null;
+  threadCreatedAt: string;
+  elapsedDays: number;
+  daysLimit: number;
 };
 
 type ScreenshotRow = {
@@ -29,6 +37,8 @@ type ScreenshotRow = {
   createdAt: string;
   sourceType: 'dm' | 'forum';
   sourceDiscordMessageId: string;
+  screenshotStatus: 'pending' | 'approved' | 'rejected';
+  reviewedByDiscordId: string | null;
 };
 
 function formatFamilyDuration(joinedAt: string) {
@@ -46,11 +56,13 @@ function formatFamilyDuration(joinedAt: string) {
 
 export function Activity() {
   const queryClient = useQueryClient();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'active' | 'completed'>('active');
 
   const { data: rows, isLoading } = useQuery<ActivityOverviewRow[]>({
-    queryKey: ['activity_overview'],
+    queryKey: ['activity_overview', statusFilter],
     queryFn: async () => {
-      const { data } = await api.get('/api/activity/overview');
+      const { data } = await api.get(`/api/activity/overview?status=${statusFilter}`);
       return data;
     },
   });
@@ -78,6 +90,26 @@ export function Activity() {
     setIsShotsLoading(false);
   };
 
+  const reviewScreenshot = async (memberId: string, screenshotId: string, status: 'approved' | 'rejected') => {
+    try {
+      await api.post(`/api/activity/${memberId}/screenshots/${screenshotId}/review`, { status });
+      setScreenshots((prev) => prev.map((s) => s.id === screenshotId ? { ...s, screenshotStatus: status } : s));
+      queryClient.invalidateQueries({ queryKey: ['activity-overview'] });
+    } catch (e) {
+      console.error('Review failed', e);
+    }
+  };
+
+  const closeActivity = async (memberId: string) => {
+    if (!confirm('Завершить активность? Ветка будет закрыта.')) return;
+    try {
+      await api.post(`/api/activity/${memberId}/close`);
+      queryClient.invalidateQueries({ queryKey: ['activity-overview'] });
+    } catch (e) {
+      console.error('Close failed', e);
+    }
+  };
+
   // Live refresh (WS)
   useEffect(() => {
     const HOST_URL = typeof window !== 'undefined' ? window.location.origin.replace('admin.', '') : 'http://localhost:3000';
@@ -88,6 +120,10 @@ export function Activity() {
 
     newSocket.on('activity_refresh', () => {
       queryClient.invalidateQueries({ queryKey: ['activity_overview'] });
+      // Also refresh screenshots if modal is open
+      if (activeMemberId) {
+        api.get(`/api/activity/${activeMemberId}/screenshots`).then(({ data }) => setScreenshots(data)).catch(() => null);
+      }
     });
 
     return () => {
@@ -102,9 +138,26 @@ export function Activity() {
     return rows.find((r) => r.memberId === activeMemberId) ?? null;
   }, [activeMemberId, rows]);
 
+  const filteredRows = useMemo(() => {
+    const source = rows || [];
+    const query = searchQuery.trim().toLowerCase();
+
+    return source.filter((row) => {
+      const matchesSearch =
+        !query ||
+        row.discordUsername.toLowerCase().includes(query) ||
+        row.discordId.includes(query) ||
+        row.gameNickname.toLowerCase().includes(query) ||
+        row.gameStaticId.toLowerCase().includes(query);
+
+      return matchesSearch;
+    });
+  }, [rows, searchQuery]);
+
   return (
     <div className="h-full flex flex-col font-sans relative">
-      <header className="mb-8 flex justify-between items-end">
+      <header className="mb-6">
+        <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20 text-white">
             <Users className="w-6 h-6" />
@@ -112,38 +165,81 @@ export function Activity() {
           <div>
             <h1 className="text-[28px] font-black tracking-tight text-slate-900 mb-1">АКТИВНОСТЬ</h1>
             <p className="text-slate-500 text-[13px] font-medium tracking-wide">
-              Дублирование активности из Discord на сайте (скриншоты).
+              Отслеживание активности новичков.
             </p>
           </div>
         </div>
+        </div>
       </header>
 
-      <div className="flex-1 bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden flex flex-col">
+      <div className="mb-6">
+        <div className="flex items-center gap-4">
+          <div className="relative flex-1">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+              <Search className="h-5 w-5 text-slate-400" />
+            </div>
+            <input
+              type="text"
+              placeholder="Поиск по Discord нику, Discord ID, Nickname, Static ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/60 rounded-xl text-[13px] font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setStatusFilter('active')}
+              className={cn(
+                'px-4 py-3 rounded-xl text-[13px] font-semibold border transition-all shadow-sm',
+                statusFilter === 'active'
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+              )}
+            >
+              Активные
+            </button>
+            <button
+              onClick={() => setStatusFilter('completed')}
+              className={cn(
+                'px-4 py-3 rounded-xl text-[13px] font-semibold border transition-all shadow-sm',
+                statusFilter === 'completed'
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+              )}
+            >
+              Завершённые
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 bg-white rounded-[24px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col">
         {isLoading ? (
           <div className="flex-1 flex items-center justify-center">
             <Loader2 className="w-8 h-8 animate-spin text-slate-300" />
           </div>
-        ) : !rows || rows.length === 0 ? (
+        ) : filteredRows.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
             <ImageIcon className="w-12 h-12 mb-3 text-slate-200" />
-            <p className="text-[14px] font-medium">Активность пока не зафиксирована</p>
+            <p className="text-[14px] font-medium">{searchQuery ? 'Ничего не найдено' : 'Активность пока не зафиксирована'}</p>
           </div>
         ) : (
           <div className="overflow-x-auto custom-scrollbar flex-1">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/50">
-                  <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-[280px]">Пользователь</th>
-                  <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">NICK | STATIC</th>
-                  <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">В семье</th>
-                  <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">Скриншоты</th>
-                  <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right w-[220px]">Действия</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[280px]">Пользователь</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">NICK | STATIC</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Скриншоты</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Дни</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Статус</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right w-[220px]">Действия</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {rows.map((r) => (
-                  <tr key={r.memberId} className="hover:bg-slate-50/30 transition-colors group">
-                    <td className="px-4 py-2.5">
+                {filteredRows.map((r) => (
+                  <tr key={r.memberId} className="hover:bg-slate-50/50 transition-colors group">
+                    <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <img
                           src={r.discordAvatarUrl || `https://ui-avatars.com/api/?name=${r.discordUsername}&background=random`}
@@ -157,30 +253,53 @@ export function Activity() {
                       </div>
                     </td>
 
-                    <td className="px-4 py-2.5 text-center">
+                    <td className="px-6 py-4 text-center">
                       <div>
                         <p className="text-[13px] font-bold text-slate-900">{r.gameNickname}</p>
                         <p className="text-[11px] text-slate-500 font-mono mt-0.5">#{r.gameStaticId}</p>
                       </div>
                     </td>
 
-                    <td className="px-4 py-2.5 text-center">
-                      <span className="inline-flex px-3 py-1 rounded-full text-[12px] font-semibold bg-slate-50 text-slate-700 border border-slate-200/70">
-                        {formatFamilyDuration(r.joinedAt)}
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="inline-flex px-3 py-1 rounded-full text-[12px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/70 font-mono">
+                          {r.approvedCount}/{r.screenshotsMax}
+                        </span>
+                        {r.pendingCount > 0 && (
+                          <span className="text-[10px] text-amber-600 font-medium">
+                            неподтв.: {r.pendingCount}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    <td className="px-6 py-4 text-center">
+                      <span className={cn(
+                        "inline-flex px-3 py-1 rounded-full text-[12px] font-semibold font-mono border",
+                        r.elapsedDays >= r.daysLimit
+                          ? "bg-red-50 text-red-700 border-red-200/70"
+                          : "bg-slate-50 text-slate-700 border-slate-200/70"
+                      )}>
+                        {r.elapsedDays}/{r.daysLimit}
                       </span>
                     </td>
 
-                    <td className="px-4 py-2.5 text-center">
-                      <span className="inline-flex px-3 py-1 rounded-full text-[12px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/70 font-mono">
-                        {r.screenshotsCount}/{r.screenshotsMax}
+                    <td className="px-6 py-4 text-center">
+                      <span className={cn(
+                        "inline-flex px-2.5 py-1 rounded-full text-[11px] font-semibold border",
+                        r.threadStatus === 'completed'
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200/70"
+                          : "bg-blue-50 text-blue-700 border-blue-200/70"
+                      )}>
+                        {r.threadStatus === 'completed' ? 'Завершена' : 'Активна'}
                       </span>
                     </td>
 
-                    <td className="px-4 py-2.5 text-right">
+                    <td className="px-6 py-4 text-right">
                       <div className="flex justify-end items-center gap-2 text-[12px]">
                         <button
                           onClick={() => openScreenshots(r.memberId)}
-                          className="w-8 h-8 flex items-center justify-center text-indigo-600 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 hover:text-indigo-700 rounded-lg transition-all shadow-sm active:scale-[0.98]"
+                          className="w-8 h-8 flex items-center justify-center text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-all shadow-sm active:scale-[0.98]"
                           title="Обзор всех скриншотов"
                         >
                           <Eye className="w-4 h-4" />
@@ -200,6 +319,16 @@ export function Activity() {
                         >
                           <LinkIcon className="w-4 h-4" />
                         </a>
+
+                        {r.threadStatus === 'active' && (
+                          <button
+                            onClick={() => closeActivity(r.memberId)}
+                            className="w-8 h-8 flex items-center justify-center text-red-500 bg-white border border-red-200 hover:bg-red-50 hover:text-red-700 rounded-lg transition-all shadow-sm active:scale-[0.98]"
+                            title="Завершить активность"
+                          >
+                            <Square className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -255,7 +384,12 @@ export function Activity() {
                     {screenshots.map((s) => (
                       <div
                         key={s.id}
-                        className="bg-slate-50 border border-slate-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+                        className={cn(
+                          "bg-slate-50 border rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow",
+                          s.screenshotStatus === 'approved' ? 'border-emerald-200' :
+                          s.screenshotStatus === 'rejected' ? 'border-red-200' :
+                          'border-slate-100'
+                        )}
                       >
                         <a href={s.imageUrl} target="_blank" rel="noreferrer">
                           <img src={s.imageUrl} alt="activity screenshot" className="w-full h-32 object-cover bg-white" />
@@ -264,7 +398,34 @@ export function Activity() {
                           <p className="text-[11px] font-mono text-slate-500 truncate" title={s.sourceDiscordMessageId}>
                             {formatMoscowDate(s.createdAt, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                           </p>
-                          <p className="text-[11px] text-slate-400 mt-1">Источник: {s.sourceType}</p>
+                          <div className="flex items-center justify-between mt-2">
+                            <span className={cn(
+                              "text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                              s.screenshotStatus === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                              s.screenshotStatus === 'rejected' ? 'bg-red-100 text-red-700' :
+                              'bg-amber-100 text-amber-700'
+                            )}>
+                              {s.screenshotStatus === 'approved' ? 'Подтверждён' : s.screenshotStatus === 'rejected' ? 'Отклонён' : 'Ожидает'}
+                            </span>
+                            {s.screenshotStatus === 'pending' && activeMemberId && (
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => reviewScreenshot(activeMemberId, s.id, 'approved')}
+                                  className="w-6 h-6 flex items-center justify-center text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors"
+                                  title="Подтвердить"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => reviewScreenshot(activeMemberId, s.id, 'rejected')}
+                                  className="w-6 h-6 flex items-center justify-center text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors"
+                                  title="Отклонить"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}

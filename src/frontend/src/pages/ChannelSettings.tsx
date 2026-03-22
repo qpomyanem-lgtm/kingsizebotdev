@@ -27,7 +27,7 @@ export function ChannelSettings() {
       const response = await api.get<SystemSetting[]>('/api/settings/system');
       return response.data;
     },
-    enabled: !!currentUser && currentUser.roleSettingsAccess === true
+    enabled: !!currentUser && currentUser.permissions?.includes('site:settings_channels:view')
   });
 
   useEffect(() => {
@@ -99,7 +99,7 @@ export function ChannelSettings() {
     return <div className="text-white">Загрузка...</div>;
   }
 
-  if (!currentUser?.roleSettingsAccess) {
+  if (!currentUser?.permissions?.includes('site:settings_channels:view')) {
     return (
       <div className="bg-red-900/50 border border-red-500/50 text-red-200 p-4 rounded-xl flex items-center gap-3">
         <AlertCircle size={24} />
@@ -111,11 +111,16 @@ export function ChannelSettings() {
   return (
     <div className="h-full flex flex-col font-sans">
       <header className="mb-8 flex justify-between items-end">
-        <div>
-          <h1 className="text-[28px] font-black tracking-tight text-slate-900 mb-2">НАСТРОЙКА КАНАЛОВ</h1>
-          <p className="text-slate-500 text-[14px] font-medium tracking-wide">
-            Укажите ID каналов в Discord, куда бот автоматически отправит панели управления.
-          </p>
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20 text-white">
+            <Hash className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-[28px] font-black tracking-tight text-slate-900 mb-1">НАСТРОЙКА КАНАЛОВ</h1>
+            <p className="text-slate-500 text-[14px] font-medium tracking-wide">
+              Укажите ID каналов в Discord, куда бот автоматически отправит панели управления.
+            </p>
+          </div>
         </div>
 
         <button
@@ -145,18 +150,18 @@ export function ChannelSettings() {
 
       <div className="flex-1 overflow-y-auto pr-2 pb-10 custom-scrollbar">
         <h2 className="text-[11px] font-bold tracking-[0.2em] text-slate-400 uppercase mb-3 px-2">Каналы системы</h2>
-        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-[24px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.02)] overflow-hidden">
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/50">
-                <th className="text-[11px] font-bold tracking-wider text-slate-500 uppercase py-3 px-4 w-[280px]">Назначение панели</th>
-                <th className="text-[11px] font-bold tracking-wider text-slate-500 uppercase py-3 px-4">ID текстового канала</th>
+                <th className="text-xs font-semibold tracking-wider text-slate-500 uppercase py-4 px-6 w-[280px]">Назначение панели</th>
+                <th className="text-xs font-semibold tracking-wider text-slate-500 uppercase py-4 px-6">ID текстового канала</th>
               </tr>
             </thead>
             <tbody>
               {/* Tickets */}
-              <tr className="border-b border-slate-100 hover:bg-slate-50/30 transition-colors">
-                <td className="py-3 px-4 flex items-center gap-3">
+              <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
+                <td className="py-4 px-6 flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-500 flex items-center justify-center shrink-0">
                     <Ticket className="w-4 h-4" />
                   </div>
@@ -165,7 +170,7 @@ export function ChannelSettings() {
                     <div className="text-[11px] text-slate-500 mt-0.5">Кнопка создания тикета-заявки</div>
                   </div>
                 </td>
-                <td className="py-3 px-4">
+                <td className="py-4 px-6">
                   <div className="relative max-w-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Hash className="h-3.5 w-3.5 text-slate-400" />
@@ -182,8 +187,8 @@ export function ChannelSettings() {
               </tr>
 
               {/* Events */}
-              <tr className="border-b border-slate-100 hover:bg-slate-50/30 transition-colors">
-                <td className="py-3 px-4 flex items-center gap-3">
+              <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
+                <td className="py-4 px-6 flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-500 flex items-center justify-center shrink-0">
                     <Calendar className="w-4 h-4" />
                   </div>
@@ -192,7 +197,7 @@ export function ChannelSettings() {
                     <div className="text-[11px] text-slate-500 mt-0.5">MCL, Капты и др. списки</div>
                   </div>
                 </td>
-                <td className="py-3 px-4">
+                <td className="py-4 px-6">
                   <div className="relative max-w-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Hash className="h-3.5 w-3.5 text-slate-400" />
@@ -209,8 +214,8 @@ export function ChannelSettings() {
               </tr>
 
               {/* AFK */}
-              <tr className="border-b border-slate-100 hover:bg-slate-50/30 transition-colors">
-                <td className="py-3 px-4 flex items-center gap-3">
+              <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
+                <td className="py-4 px-6 flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-500 flex items-center justify-center shrink-0">
                     <Moon className="w-4 h-4" />
                   </div>
@@ -219,7 +224,7 @@ export function ChannelSettings() {
                     <div className="text-[11px] text-slate-500 mt-0.5">Уход в АФК и список отдыхающих</div>
                   </div>
                 </td>
-                <td className="py-3 px-4">
+                <td className="py-4 px-6">
                   <div className="relative max-w-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Hash className="h-3.5 w-3.5 text-slate-400" />
@@ -236,8 +241,8 @@ export function ChannelSettings() {
               </tr>
 
               {/* Online Settings */}
-              <tr className="border-b border-slate-100 hover:bg-slate-50/30 transition-colors">
-                <td className="py-3 px-4 flex items-center gap-3">
+              <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
+                <td className="py-4 px-6 flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-500 flex items-center justify-center shrink-0">
                     <Activity className="w-4 h-4" />
                   </div>
@@ -246,7 +251,7 @@ export function ChannelSettings() {
                     <div className="text-[11px] text-slate-500 mt-0.5">Живой мониторинг онлайна сервера</div>
                   </div>
                 </td>
-                <td className="py-3 px-4">
+                <td className="py-4 px-6">
                   <div className="relative max-w-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Hash className="h-3.5 w-3.5 text-slate-400" />
@@ -263,8 +268,8 @@ export function ChannelSettings() {
               </tr>
 
               {/* Activity Forum */}
-              <tr className="border-b border-slate-100 hover:bg-slate-50/30 transition-colors">
-                <td className="py-3 px-4 flex items-center gap-3">
+              <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
+                <td className="py-4 px-6 flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg bg-violet-50 text-violet-500 flex items-center justify-center shrink-0">
                     <Activity className="w-4 h-4" />
                   </div>
@@ -273,7 +278,7 @@ export function ChannelSettings() {
                     <div className="text-[11px] text-slate-500 mt-0.5">ID форума, где создаются ветки скриншотов</div>
                   </div>
                 </td>
-                <td className="py-3 px-4">
+                <td className="py-4 px-6">
                   <div className="relative max-w-sm">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Hash className="h-3.5 w-3.5 text-slate-400" />

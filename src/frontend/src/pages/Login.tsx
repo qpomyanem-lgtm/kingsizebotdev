@@ -1,5 +1,7 @@
 import { useSearchParams, Navigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../lib/api';
+import { api } from '../lib/api';
 
 export function Login() {
   const [searchParams] = useSearchParams();
@@ -7,9 +9,18 @@ export function Login() {
   const sessionExpired = searchParams.get('error') === 'SessionExpired';
   
   const { data: user, isLoading } = useAuth();
+  const { data: adminRoles } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ['adminRolesForLogin'],
+    queryFn: async () => (await api.get('/api/settings/admin-roles')).data,
+    retry: 1,
+  });
 
-  if (!isLoading && user && (user.role === 'owner' || user.role === 'admin')) {
-    return <Navigate to="/applications" replace />;
+  const requiredRolesText = (adminRoles && adminRoles.length > 0)
+    ? adminRoles.map(r => r.name).join(', ')
+    : 'админская роль доступа';
+
+  if (!isLoading && user && user.permissions && user.permissions.length > 0) {
+    return <Navigate to="/" replace />;
   }
 
   const handleDiscordLogin = () => {
@@ -46,7 +57,7 @@ export function Login() {
 
           {noAccess && (
             <div className="mb-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-100 text-rose-600 text-[13px] font-medium text-center leading-snug">
-              Нет доступа к панели. Требуется одна из ролей: OWNER, ., DEP, HIGH, RECRUIT, TIER CHECK.
+              Нет доступа к панели. Требуется одна из ролей: {requiredRolesText}.
             </div>
           )}
 

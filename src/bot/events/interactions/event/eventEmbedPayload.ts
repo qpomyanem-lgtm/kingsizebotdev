@@ -10,9 +10,9 @@ import {
     TextDisplayBuilder,
 } from 'discord.js';
 import { db } from '../../../../db';
-import { events, eventParticipants, eventMaps } from '../../../../db/schema';
+import { events, eventParticipants, eventMaps, roles } from '../../../../db/schema';
 import { eq, asc } from 'drizzle-orm';
-import { DISCORD_TIER_STR, toUnixTs } from './eventShared';
+import { toUnixTs } from './eventShared';
 
 export async function getEventEmbedPayload(eventId: string): Promise<any | null> {
     const [event] = await db.select().from(events).where(eq(events.id, eventId));
@@ -22,13 +22,33 @@ export async function getEventEmbedPayload(eventId: string): Promise<any | null>
         .select()
         .from(eventParticipants)
         .where(eq(eventParticipants.eventId, eventId))
-        .orderBy(asc(eventParticipants.tier), asc(eventParticipants.joinedAt));
+        .orderBy(asc(eventParticipants.joinedAt));
+
+    const tierRoles = await db
+        .select()
+        .from(roles)
+        .where(eq(roles.systemType, 'tier'))
+        .orderBy(asc(roles.priority));
+
+    const tierRankByRoleId = new Map<string, number>();
+    const tierNameByRoleId = new Map<string, string>();
+    tierRoles.forEach((r, i) => {
+        tierRankByRoleId.set(r.id, i + 1);
+        tierNameByRoleId.set(r.id, r.name);
+    });
+
+    participants.sort((a, b) => {
+        const aRank = a.tierRoleId ? (tierRankByRoleId.get(a.tierRoleId) ?? 999) : 999;
+        const bRank = b.tierRoleId ? (tierRankByRoleId.get(b.tierRoleId) ?? 999) : 999;
+        if (aRank !== bRank) return aRank - bRank;
+        return a.joinedAt.getTime() - b.joinedAt.getTime();
+    });
 
     const mainList = participants.slice(0, event.slots);
     const reserveList = participants.slice(event.slots);
 
     const formatParticipant = (p: (typeof participants)[number]) => {
-        const tierName = DISCORD_TIER_STR[p.tier] || DISCORD_TIER_STR[4];
+        const tierName = p.tierRoleId ? (tierNameByRoleId.get(p.tierRoleId) || 'Без Tier') : 'Без Tier';
         return `✦ <@${p.userId}> ✶ ${tierName}`;
     };
 

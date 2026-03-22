@@ -3,7 +3,6 @@ import {
     ButtonBuilder,
     ButtonInteraction,
     ButtonStyle,
-    GuildMember,
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
@@ -12,7 +11,6 @@ import { db } from '../../../../db';
 import { events, eventParticipants, members, eventMaps } from '../../../../db/schema';
 import { eq, and, asc } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
-import { canManageEvents, TIER_MAP } from './eventShared';
 import { refreshEventEmbed } from './eventEmbedPayload.js';
 import { showModalViaInteractionCallback } from '../../../lib/interactionResponses';
 
@@ -56,9 +54,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
 
     // ── manage ──
     if (action === 'manage') {
-        const canManage =
-            interaction.user.id === event.creatorId ||
-            (await canManageEvents(interaction.member as GuildMember | null, interaction.user.id));
+        const canManage = interaction.user.id === event.creatorId;
 
         if (!canManage) {
             await sendEphemeral({ content: 'У вас нет прав для управления этим списком.', ephemeral: true });
@@ -100,9 +96,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
 
     // ── selectmap ──
     if (action === 'selectmap') {
-        const canManage =
-            interaction.user.id === event.creatorId ||
-            (await canManageEvents(interaction.member as GuildMember | null, interaction.user.id));
+        const canManage = interaction.user.id === event.creatorId;
 
         if (!canManage) {
             await sendEphemeral({ content: 'У вас нет прав.', ephemeral: true });
@@ -149,9 +143,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
 
     // ── setgroup ──
     if (action === 'setgroup') {
-        const canChange =
-            interaction.user.id === event.creatorId ||
-            (await canManageEvents(interaction.member as GuildMember | null, interaction.user.id));
+        const canChange = interaction.user.id === event.creatorId;
         if (!canChange) {
             await sendEphemeral({ content: 'У вас нет прав для изменения этого списка.', ephemeral: true });
             return;
@@ -177,9 +169,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
 
     // ── close ──
     if (action === 'close') {
-        const canClose =
-            interaction.user.id === event.creatorId ||
-            (await canManageEvents(interaction.member as GuildMember | null, interaction.user.id));
+        const canClose = interaction.user.id === event.creatorId;
         if (!canClose) {
             await sendEphemeral({ content: 'У вас нет прав для закрытия списка.', ephemeral: true });
             return;
@@ -216,7 +206,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
 
     if (action === 'join') {
         const [memberData] = await db.select().from(members).where(eq(members.discordId, interaction.user.id));
-        const tier = memberData ? TIER_MAP[memberData.tier] || 4 : 4;
+        const tierRoleId = memberData?.tierRoleId || null;
 
         const existing = await db
             .select()
@@ -228,7 +218,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
             return;
         }
 
-        await db.insert(eventParticipants).values({ id: uuidv4(), eventId, userId: interaction.user.id, tier });
+        await db.insert(eventParticipants).values({ id: uuidv4(), eventId, userId: interaction.user.id, tierRoleId });
         await refreshEventEmbed(interaction.message, eventId);
         await sendEphemeral({ content: 'Вы успешно присоединились к списку!', ephemeral: true });
     }

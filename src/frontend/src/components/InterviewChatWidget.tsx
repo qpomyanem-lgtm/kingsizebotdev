@@ -17,6 +17,7 @@ interface ChatMessage {
 
 export function InterviewChatWidget() {
     const { data: user } = useAuth();
+    const canUseInterviewChat = !!user?.permissions?.includes('site:applications:view');
     const queryClient = useQueryClient();
     const [socket, setSocket] = useState<Socket | null>(null);
     const [isOpen, setIsOpen] = useState(false);
@@ -31,7 +32,8 @@ export function InterviewChatWidget() {
         queryFn: async () => {
             const { data } = await api.get('/api/applications');
             return data;
-        }
+        },
+        enabled: canUseInterviewChat,
     });
 
     const readyApps = applications?.filter(app => 
@@ -42,6 +44,7 @@ export function InterviewChatWidget() {
     const activeApp = readyApps.find(a => a.id === activeChat);
 
     useEffect(() => {
+        if (!canUseInterviewChat) return;
         const HOST_URL = typeof window !== 'undefined' ? window.location.origin.replace('admin.', '') : 'http://localhost:3000';
         
         const newSocket = io(import.meta.env.VITE_API_URL || HOST_URL, {
@@ -57,10 +60,11 @@ export function InterviewChatWidget() {
 
         setSocket(newSocket);
         return () => { newSocket.close(); };
-    }, [queryClient]);
+    }, [canUseInterviewChat, queryClient]);
 
     // Handle incoming messages for the active chat
     useEffect(() => {
+        if (!canUseInterviewChat) return;
         if (!socket || !activeChat) return;
 
         const handleNewMessage = (msg: ChatMessage) => {
@@ -72,10 +76,11 @@ export function InterviewChatWidget() {
         return () => {
             socket.off(`interview_message_${activeChat}`, handleNewMessage);
         };
-    }, [socket, activeChat]);
+    }, [canUseInterviewChat, socket, activeChat]);
 
     // Fetch initial chat history
     useEffect(() => {
+        if (!canUseInterviewChat) return;
         if (!activeChat) {
             setMessages([]);
             return;
@@ -84,7 +89,7 @@ export function InterviewChatWidget() {
             setMessages(res.data);
             setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
         });
-    }, [activeChat]);
+    }, [canUseInterviewChat, activeChat]);
 
     const sendMessageMutation = useMutation({
         mutationFn: async (content: string) => {
@@ -104,7 +109,7 @@ export function InterviewChatWidget() {
         }
     };
 
-    if (readyApps.length === 0) return null;
+    if (!canUseInterviewChat || readyApps.length === 0) return null;
 
     return (
         <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end">

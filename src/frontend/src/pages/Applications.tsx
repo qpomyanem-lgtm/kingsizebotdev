@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../lib/api';
+import { api, useAuth } from '../lib/api';
 import { formatMoscowDate } from '../lib/time';
-import { Clock, PhoneCall, Check, X, Eye, Users, UserCheck, UserX, AlertCircle } from 'lucide-react';
+import { Clock, PhoneCall, Check, X, Eye, Users, UserCheck, UserX, AlertCircle, ClipboardCheck, Search, Filter } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export interface Application {
@@ -23,7 +23,10 @@ export interface Application {
 }
 
 export function Applications() {
-    const [filter, setFilter] = useState<'all' | 'pending' | 'interview'>('pending');
+    const { data: currentUser } = useAuth();
+    const canManageApplications = !!currentUser?.permissions?.includes('site:applications:actions');
+    const [filter, setFilter] = useState<'all' | 'pending' | 'interview'>('all');
+    const [searchQuery, setSearchQuery] = useState('');
     const [selectedApp, setSelectedApp] = useState<Application | null>(null);
     const queryClient = useQueryClient();
 
@@ -120,6 +123,8 @@ export function Applications() {
             setStaticError('');
         }
 
+        if (!canManageApplications) return;
+
         if (valid && acceptAppId) {
             updateStatusMutation.mutate({
                 id: acceptAppId,
@@ -131,6 +136,7 @@ export function Applications() {
     };
 
     const handleRejectSubmit = () => {
+        if (!canManageApplications) return;
         if (!rejectReason.trim()) return;
         if (rejectAppId) {
             updateStatusMutation.mutate({
@@ -141,11 +147,31 @@ export function Applications() {
         }
     };
 
-    const filteredApps = applications?.filter(app => {
-        if (filter === 'all') return ['pending', 'interview', 'interview_ready'].includes(app.status as any);
-        if (filter === 'interview') return ['interview', 'interview_ready'].includes(app.status as any);
-        return app.status === filter;
-    }) || [];
+    const totalOpenApps = useMemo(
+        () => applications?.filter(app => ['pending', 'interview', 'interview_ready'].includes(app.status)).length || 0,
+        [applications]
+    );
+
+    const filteredApps = useMemo(() => {
+        const source = applications || [];
+        const query = searchQuery.trim().toLowerCase();
+
+        return source.filter(app => {
+            const matchesFilter =
+                filter === 'all'
+                    ? ['pending', 'interview', 'interview_ready'].includes(app.status)
+                    : filter === 'interview'
+                        ? ['interview', 'interview_ready'].includes(app.status)
+                        : app.status === filter;
+
+            const matchesSearch =
+                !query ||
+                app.discordUsername.toLowerCase().includes(query) ||
+                app.discordId.includes(query);
+
+            return matchesFilter && matchesSearch;
+        });
+    }, [applications, filter, searchQuery]);
 
     const getStatusBadge = (status: string) => {
         switch (status) {
@@ -174,10 +200,11 @@ export function Applications() {
 
     return (
         <div className="h-full flex flex-col font-sans relative">
-            <header className="mb-8 flex justify-between items-end">
+            <header className="mb-6">
+                <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center shadow-lg shadow-slate-900/20 text-white">
-                        <Users className="w-6 h-6" />
+                    <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20 text-white">
+                        <ClipboardCheck className="w-6 h-6" />
                     </div>
                     <div>
                         <h1 className="text-[28px] font-black tracking-tight text-slate-900 mb-1">ЗАЯВКИ</h1>
@@ -186,29 +213,50 @@ export function Applications() {
                         </p>
                     </div>
                 </div>
-                <div className="flex gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/60 shadow-inner">
+                <span className="text-sm font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">
+                    Всего заявок: {totalOpenApps}
+                </span>
+                </div>
+            </header>
+
+            <div className="flex flex-col xl:flex-row items-start xl:items-center gap-4 mb-6">
+                <div className="relative flex-1 w-full">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <Search className="h-5 w-5 text-slate-400" />
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Поиск по Discord нику или Discord ID..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/60 rounded-xl text-[13px] font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
+                    />
+                </div>
+                <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl border border-slate-200/60 shadow-sm">
+                    <Filter className="w-4 h-4 text-slate-400" />
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-2">Статус</span>
                     <button
                         onClick={() => setFilter('all')}
-                        className={cn("px-5 py-2 rounded-xl text-[13px] font-bold transition-all duration-300", filter === 'all' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                        className={cn("px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all", filter === 'all' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}
                     >
-                        Все заявки
+                        Все
                     </button>
                     <button
                         onClick={() => setFilter('pending')}
-                        className={cn("px-5 py-2 rounded-xl text-[13px] font-bold transition-all duration-300", filter === 'pending' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                        className={cn("px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all", filter === 'pending' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}
                     >
                         Ожидают
                     </button>
                     <button
                         onClick={() => setFilter('interview')}
-                        className={cn("px-5 py-2 rounded-xl text-[13px] font-bold transition-all duration-300", filter === 'interview' ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                        className={cn("px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all", filter === 'interview' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}
                     >
                         На обзвоне
                     </button>
                 </div>
-            </header>
+            </div>
 
-            <div className="flex-1 bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden flex flex-col">
+            <div className="flex-1 bg-white rounded-[24px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col">
                 {isLoading ? (
                     <div className="flex-1 flex items-center justify-center">
                         <div className="w-8 h-8 rounded-full border-4 border-slate-900 border-t-transparent animate-spin"></div>
@@ -216,23 +264,23 @@ export function Applications() {
                 ) : filteredApps.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
                         <Users className="w-12 h-12 mb-3 text-slate-200" />
-                        <p className="text-[14px] font-medium">В этой категории пока нет заявок</p>
+                        <p className="text-[14px] font-medium">{searchQuery ? 'По запросу ничего не найдено' : 'В этой категории пока нет заявок'}</p>
                     </div>
                 ) : (
                     <div className="overflow-x-auto custom-scrollbar flex-1">
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="border-b border-slate-100 bg-slate-50/50">
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-[280px]">Пользователь</th>
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-[25%] text-center">Статус</th>
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-[25%] text-center">Время</th>
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Управление</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[280px]">Пользователь</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[25%] text-center">Статус</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[25%] text-center">Время</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Управление</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {filteredApps.map(app => (
-                                    <tr key={app.id} className="hover:bg-slate-50/30 transition-colors group">
-                                        <td className="px-4 py-2.5">
+                                    <tr key={app.id} className="hover:bg-slate-50/50 transition-colors group">
+                                        <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
                                                 <img
                                                     src={app.discordAvatarUrl || `https://ui-avatars.com/api/?name=${app.discordUsername}&background=random`}
@@ -245,12 +293,12 @@ export function Applications() {
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-2.5">
+                                        <td className="px-6 py-4">
                                             <div className="flex justify-center">
                                                 {getStatusBadge(app.status)}
                                             </div>
                                         </td>
-                                        <td className="px-4 py-2.5">
+                                        <td className="px-6 py-4">
                                             <div className="flex flex-col items-center justify-center">
                                                 <div className="flex items-center gap-1.5 text-[12px] font-medium text-slate-600">
                                                     <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -263,7 +311,7 @@ export function Applications() {
                                                 )}
                                             </div>
                                         </td>
-                                        <td className="px-4 py-2.5 text-right">
+                                        <td className="px-6 py-4 text-right">
                                             <div className="flex justify-end gap-1 text-[12px]">
                                                 <button
                                                     onClick={() => setSelectedApp(app)}
@@ -275,17 +323,28 @@ export function Applications() {
                                                 {app.status === 'pending' && (
                                                     <>
                                                         <button
-                                                            disabled={updateStatusMutation.isPending}
-                                                            onClick={() => updateStatusMutation.mutate({ id: app.id, status: 'interview' })}
-                                                            className="flex items-center gap-1.5 px-3 h-8 text-blue-600 bg-blue-50/50 hover:bg-blue-100 rounded-lg transition-all shadow-sm active:scale-[0.98] font-semibold border border-blue-100"
+                                                            disabled={updateStatusMutation.isPending || !canManageApplications}
+                                                            onClick={() => canManageApplications && updateStatusMutation.mutate({ id: app.id, status: 'interview' })}
+                                                            className={cn(
+                                                                "flex items-center gap-1.5 px-3 h-8 rounded-lg transition-all shadow-sm font-semibold border",
+                                                                canManageApplications
+                                                                    ? "text-blue-600 bg-blue-50/50 hover:bg-blue-100 active:scale-[0.98] border-blue-100"
+                                                                    : "text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed opacity-70"
+                                                            )}
+                                                            title={canManageApplications ? "Перевести на обзвон" : "Нет прав на взаимодействие с заявками"}
                                                         >
                                                             <PhoneCall className="w-3.5 h-3.5" /> Обзвон
                                                         </button>
                                                         <button
-                                                            disabled={updateStatusMutation.isPending}
-                                                            onClick={() => setRejectAppId(app.id)}
-                                                            className="w-8 h-8 flex items-center justify-center text-rose-600 bg-rose-50/50 hover:bg-rose-100 rounded-lg transition-all shadow-sm active:scale-[0.98] border border-rose-100"
-                                                            title="Отклонить"
+                                                            disabled={updateStatusMutation.isPending || !canManageApplications}
+                                                            onClick={() => canManageApplications && setRejectAppId(app.id)}
+                                                            className={cn(
+                                                                "w-8 h-8 flex items-center justify-center rounded-lg transition-all shadow-sm border",
+                                                                canManageApplications
+                                                                    ? "text-rose-600 bg-rose-50/50 hover:bg-rose-100 active:scale-[0.98] border-rose-100"
+                                                                    : "text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed opacity-70"
+                                                            )}
+                                                            title={canManageApplications ? "Отклонить" : "Нет прав на взаимодействие с заявками"}
                                                         >
                                                             <X className="w-4 h-4" />
                                                         </button>
@@ -294,17 +353,28 @@ export function Applications() {
                                                 {(app.status === 'interview' || app.status === 'interview_ready') && (
                                                     <>
                                                         <button
-                                                            disabled={updateStatusMutation.isPending}
-                                                            onClick={() => setAcceptAppId(app.id)}
-                                                            className="flex items-center gap-1.5 px-3 h-8 text-emerald-600 bg-emerald-50/50 hover:bg-emerald-100 rounded-lg transition-all shadow-sm active:scale-[0.98] font-semibold border border-emerald-100"
+                                                            disabled={updateStatusMutation.isPending || !canManageApplications}
+                                                            onClick={() => canManageApplications && setAcceptAppId(app.id)}
+                                                            className={cn(
+                                                                "flex items-center gap-1.5 px-3 h-8 rounded-lg transition-all shadow-sm font-semibold border",
+                                                                canManageApplications
+                                                                    ? "text-emerald-600 bg-emerald-50/50 hover:bg-emerald-100 active:scale-[0.98] border-emerald-100"
+                                                                    : "text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed opacity-70"
+                                                            )}
+                                                            title={canManageApplications ? "Принять" : "Нет прав на взаимодействие с заявками"}
                                                         >
                                                             <Check className="w-3.5 h-3.5" /> Принять
                                                         </button>
                                                         <button
-                                                            disabled={updateStatusMutation.isPending}
-                                                            onClick={() => setRejectAppId(app.id)}
-                                                            className="w-8 h-8 flex items-center justify-center text-rose-600 bg-rose-50/50 hover:bg-rose-100 rounded-lg transition-all shadow-sm active:scale-[0.98] border border-rose-100"
-                                                            title="Отклонить"
+                                                            disabled={updateStatusMutation.isPending || !canManageApplications}
+                                                            onClick={() => canManageApplications && setRejectAppId(app.id)}
+                                                            className={cn(
+                                                                "w-8 h-8 flex items-center justify-center rounded-lg transition-all shadow-sm border",
+                                                                canManageApplications
+                                                                    ? "text-rose-600 bg-rose-50/50 hover:bg-rose-100 active:scale-[0.98] border-rose-100"
+                                                                    : "text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed opacity-70"
+                                                            )}
+                                                            title={canManageApplications ? "Отклонить" : "Нет прав на взаимодействие с заявками"}
                                                         >
                                                             <X className="w-4 h-4" />
                                                         </button>

@@ -2,43 +2,70 @@
 
 Discord bot + web dashboard для управления семьёй Majestic RP.
 
-Основные модули:
-- `src/backend` — Fastify REST API + socket.io (routes — обёртки, бизнес-логика — `features/*/controller.ts`)
-- `src/bot` — discord.js bot (Components V2)
-- `src/frontend` — React SPA (Vite)
-- `src/db` — PostgreSQL + Drizzle ORM
+## Модули
+
+| Модуль | Технологии | Путь |
+|---|---|---|
+| Backend | Fastify, Drizzle ORM, PostgreSQL, socket.io, Lucia auth | `src/backend/` |
+| Bot | Discord.js v14, Components V2 | `src/bot/` |
+| Frontend | React 19, Vite, TanStack Query, Tailwind CSS | `src/frontend/` |
+| DB | PostgreSQL, Drizzle ORM, миграции | `src/db/` |
+
+## Архитектура прав
+
+Права — плоские строки вида `site:<page>:view` / `site:<page>:actions` / `bot:<feature>`.
+Хранятся в таблице `role_permissions`. Привязываются к ролям (`roles.type = 'access'`).
+`GET /api/auth/me` возвращает `permissions: string[]` (объединение прав всех ролей пользователя).
+Кеш прав на бэкенде инвалидируется при любом изменении ролей/прав.
+
+## Система ролей
+
+Все роли хранятся в таблице `roles` (не в Discord, Discord Role ID — опциональная привязка).
+
+- `type = 'none'` — не настроена (создаётся по умолчанию)
+- `type = 'system'` — системная (main, new, tier, blacklist)
+- `type = 'access'` — даёт права на сайте
+
+Тип назначается на странице «Настройка доступа», не при создании роли.
+
+> Источник истины по всем API — `AGENTS_CONTRACT.md`.
 
 ---
 
-## Контракт поведения (для людей и AI-агентов)
+## Для AI-агентов и разработчиков
 
-Этот проект активно рефакторится. Чтобы при изменениях ничего не сломать, используйте контракт:
-- файл `AGENTS_CONTRACT.md` содержит:
-  - REST API (method/path)
-  - socket.io events
-  - Discord interaction `customId` + соответствие handlers
-  - IPC endpoints (backend <-> bot)
-  - `system_settings.key`, используемые в рантайме
-  - embeds/panels, которые бот deploy’ит/обновляет  - Discord event handlers (messageDelete, guildMemberUpdate, guildMemberAdd, messageCreate)
-  - Background intervals (cron-задачи бота)
-`AGENTS_CONTRACT.md` — источник истины (source of truth). `README.md` — витрина: он описывает то же поведение людям, но при расхождениях ориентируйтесь на контракт.
+`AGENTS_CONTRACT.md` — источник истины по всем API, IPC, customId и system_settings.
+`README.md` — обзор для людей; при расхождениях ориентируйтесь на контракт.
 
-Если вы меняете код, но нужно сохранить поведение 1:1 — сначала обновляйте контракт, затем — код.
-
----
-
-## REST API (короткий список)
+## REST API (краткий список)
 
 ### Auth
 - `GET /api/auth/discord`
 - `GET /api/auth/discord/callback`
 - `GET /api/auth/complete`
-- `GET /api/auth/me`
+- `GET /api/auth/me` → `{ user, permissions: string[] }`
 - `POST /api/auth/logout`
 
-### Settings
-- `GET /api/settings/roles`
-- `PATCH /api/settings/roles`
+### Roles (настройка ролей)
+- `GET /api/settings/roles` → список всех ролей (query: `type`, `systemType`)
+- `POST /api/settings/roles` → создать роль (type='none' по умолчанию)
+- `PATCH /api/settings/roles/:id` → обновить имя/цвет/иконку/discordRoleId
+- `DELETE /api/settings/roles/:id` → удалить роль (нельзя @everyone)
+- `PUT /api/settings/roles/reorder` → изменить приоритеты
+- `PATCH /api/settings/roles/:id/access` → задать type/systemType/isAdmin
+- `GET /api/settings/roles/:id/permissions` → права роли
+- `PUT /api/settings/roles/:id/permissions` → заменить права роли
+- `GET /api/settings/admin-roles` → список admin-ролей (type=access, isAdmin=true)
+
+### Access (настройка доступа)
+- `GET /api/access-roles` → роли с permissions
+- `GET /api/access-roles/permissions-catalog` → каталог всех permissions
+- `POST /api/access-roles` → создать access-роль (устарело, используйте Roles API)
+- `PATCH /api/access-roles/:id` → обновить access-роль
+- `DELETE /api/access-roles/:id` → удалить access-роль
+- `PUT /api/access-roles/:id/permissions` → заменить permissions
+
+### System settings
 - `GET /api/settings/system`
 - `PATCH /api/settings/system`
 - `POST /api/settings/sync-members`

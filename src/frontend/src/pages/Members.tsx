@@ -1,9 +1,20 @@
 import { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../lib/api';
+import { api, useAuth } from '../lib/api';
 import { Users, UserCog, UserX, AlertCircle, X, ShieldAlert, Search, Filter } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { DynamicIcon } from '../components/IconPicker';
+
+export interface Role {
+  id: string;
+  name: string;
+  color: string;
+  icon: string | null;
+  priority: number;
+  type: 'system' | 'access';
+  systemType: string | null;
+}
 
 export interface Member {
     id: string;
@@ -12,14 +23,25 @@ export interface Member {
     discordAvatarUrl: string | null;
     gameNickname: string;
     gameStaticId: string;
-    role: 'KINGSIZE' | 'NEWKINGSIZE';
-    tier: 'TIER 1' | 'TIER 2' | 'TIER 3' | 'NONE';
+    roleId: string | null;
+    tierRoleId: string | null;
     status: 'active' | 'kicked';
     joinedAt: string;
 }
 
 export function Members() {
     const queryClient = useQueryClient();
+    const { data: currentUser } = useAuth();
+    const canEdit = currentUser?.permissions?.includes('site:members:actions');
+    const canKick = currentUser?.permissions?.includes('site:kicked:actions') || currentUser?.permissions?.includes('site:members:actions');
+
+    const { data: roles = [] } = useQuery<Role[]>({
+        queryKey: ['roles'],
+        queryFn: async () => (await api.get('/api/members/roles')).data,
+    });
+
+    const mainRoles = useMemo(() => roles.filter(r => r.systemType === 'main' || r.systemType === 'new').sort((a,b) => a.priority - b.priority), [roles]);
+    const tierRoles = useMemo(() => roles.filter(r => r.systemType === 'tier').sort((a,b) => a.priority - b.priority), [roles]);
 
     // Modals state
     const [editMember, setEditMember] = useState<Member | null>(null);
@@ -28,8 +50,8 @@ export function Members() {
     // Edit fields
     const [editNick, setEditNick] = useState('');
     const [editStatic, setEditStatic] = useState('');
-    const [editRole, setEditRole] = useState<'KINGSIZE' | 'NEWKINGSIZE'>('NEWKINGSIZE');
-    const [editTier, setEditTier] = useState<'TIER 1' | 'TIER 2' | 'TIER 3' | 'NONE'>('NONE');
+    const [editRoleId, setEditRoleId] = useState<string | null>(null);
+    const [editTierRoleId, setEditTierRoleId] = useState<string | null>(null);
     const [errorMsg, setErrorMsg] = useState('');
 
     // Kick fields
@@ -56,12 +78,14 @@ export function Members() {
             const query = searchQuery.toLowerCase();
             const matchesSearch = 
                 member.gameNickname.toLowerCase().includes(query) ||
-                member.gameStaticId.toLowerCase().includes(query) ||
+                (member.gameStaticId || '').toLowerCase().includes(query) ||
                 member.discordUsername.toLowerCase().includes(query) ||
                 member.discordId.toLowerCase().includes(query);
 
-            const matchesRole = selectedRoles.length === 0 || selectedRoles.includes(member.role);
-            const matchesTier = selectedTiers.length === 0 || selectedTiers.includes(member.tier);
+            const matchesRole = selectedRoles.length === 0 || (member.roleId && selectedRoles.includes(member.roleId));
+            const matchesTier = selectedTiers.length === 0 || 
+                                (member.tierRoleId && selectedTiers.includes(member.tierRoleId)) || 
+                                (!member.tierRoleId && selectedTiers.includes('NONE'));
 
             return matchesSearch && matchesRole && matchesTier;
         });
@@ -77,8 +101,6 @@ export function Members() {
 
     const totalPages = Math.ceil(filteredMembers.length / ITEMS_PER_PAGE);
     const paginatedMembers = filteredMembers.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
-
-
 
     const updateMemberMutation = useMutation({
         mutationFn: async (payload: { id: string, data: any }) => {
@@ -104,10 +126,10 @@ export function Members() {
 
     const openProfile = (member: Member) => {
         setEditMember(member);
-        setEditNick(member.gameNickname);
-        setEditStatic(member.gameStaticId);
-        setEditRole(member.role);
-        setEditTier(member.tier);
+        setEditNick(member.gameNickname || '');
+        setEditStatic(member.gameStaticId || '');
+        setEditRoleId(member.roleId || (mainRoles.length > 0 ? mainRoles[0].id : null));
+        setEditTierRoleId(member.tierRoleId);
         setErrorMsg('');
     };
 
@@ -144,8 +166,8 @@ export function Members() {
             data: {
                 gameNickname: editNick,
                 gameStaticId: editStatic,
-                role: editRole,
-                tier: editTier === 'NONE' ? 'БЕЗ TIER' : editTier
+                roleId: editRoleId,
+                tierRoleId: editTierRoleId
             }
         });
     };
@@ -158,30 +180,53 @@ export function Members() {
         kickMemberMutation.mutate({ id: kickMember!.id, reason: kickReason, blacklist: addToBlacklist });
     };
 
-    const getRoleBadge = (role: string) => {
-        if (role === 'KINGSIZE') return <span className="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-semibold">KINGSIZE</span>;
-        return <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-semibold">NEWKINGSIZE</span>;
+    const getRoleBadge = (roleId: string | null) => {
+        const role = roles.find(r => r.id === roleId);
+        if (!role) return <span className="px-2.5 py-1 bg-slate-100 text-slate-500 rounded-full text-[11px] font-semibold">Неизвестно</span>;
+        
+        return (
+          <span 
+            className="px-2.5 py-1 rounded-full text-[11px] font-semibold inline-flex items-center gap-1.5 border border-white/20 shadow-sm"
+            style={{ backgroundColor: role.color + '25', color: role.color }}
+          >
+            <DynamicIcon name={role.icon} className="w-3 h-3" />
+            {role.name}
+          </span>
+        );
     };
 
-    const getTierBadge = (tier: string) => {
-        if (tier === 'NONE' || tier === 'БЕЗ TIER') return <span className="text-slate-400 text-[11px] font-bold tracking-wider">БЕЗ TIER</span>;
-        return <span className="px-2.5 py-1 bg-slate-100 text-slate-800 border border-slate-200 rounded-md text-[11px] font-bold font-mono tracking-wider">{tier}</span>;
+    const getTierBadge = (tierRoleId: string | null) => {
+        if (!tierRoleId) return <span className="text-slate-400 text-[11px] font-bold tracking-wider">БЕЗ TIER</span>;
+        const role = roles.find(r => r.id === tierRoleId);
+        if (!role) return <span className="text-slate-400 text-[11px] font-bold tracking-wider">{tierRoleId}</span>;
+
+        return (
+          <span 
+            className="px-2.5 py-1 rounded-md text-[11px] font-bold font-mono tracking-wider border"
+            style={{ borderColor: role.color + '40', backgroundColor: role.color + '10', color: role.color }}
+          >
+            {role.name}
+          </span>
+        );
     };
 
     return (
         <div className="h-full flex flex-col font-sans relative">
             <header className="mb-8 flex justify-between items-end">
                 <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center shadow-lg shadow-slate-900/20 text-white">
+                    <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20 text-white">
                         <Users className="w-6 h-6" />
                     </div>
                     <div>
                         <h1 className="text-[28px] font-black tracking-tight text-slate-900 mb-1">УЧАСТНИКИ</h1>
                         <p className="text-slate-500 text-[13px] font-medium tracking-wide">
-                            Управление действующим составом семьи. <span className="font-bold text-slate-700 ml-1">Всего участников: {filteredMembers.length}</span>
+                            Управление действующим составом семьи.
                         </p>
                     </div>
                 </div>
+                <span className="text-sm font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">
+                    Всего участников: {members?.length || 0}
+                </span>
             </header>
 
             <div className="mb-6 flex flex-col xl:flex-row gap-4">
@@ -191,7 +236,7 @@ export function Members() {
                     </div>
                     <input
                         type="text"
-                        placeholder="Поиск по Nick, Static, Discord..."
+                        placeholder="Поиск по Discord нику, Discord ID, Nickname, Static ID..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/60 rounded-xl text-[13px] font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
@@ -202,18 +247,19 @@ export function Members() {
                     <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl border border-slate-200/60 shadow-sm">
                         <Filter className="w-4 h-4 text-slate-400" />
                         <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-2">Роль</span>
-                        {['KINGSIZE', 'NEWKINGSIZE'].map(role => (
+                        {mainRoles.map(role => (
                             <button
-                                key={role}
-                                onClick={() => setSelectedRoles(prev => prev.includes(role) ? prev.filter(r => r !== role) : [...prev, role])}
+                                key={role.id}
+                                onClick={() => setSelectedRoles(prev => prev.includes(role.id) ? prev.filter(r => r !== role.id) : [...prev, role.id])}
                                 className={cn(
                                     "px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all",
-                                    selectedRoles.includes(role) 
-                                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20" 
+                                    selectedRoles.includes(role.id) 
+                                        ? "text-white shadow-md" 
                                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                                 )}
+                                style={selectedRoles.includes(role.id) ? { backgroundColor: role.color } : {}}
                             >
-                                {role}
+                                {role.name}
                             </button>
                         ))}
                     </div>
@@ -221,30 +267,37 @@ export function Members() {
                     <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl border border-slate-200/60 shadow-sm">
                         <Filter className="w-4 h-4 text-slate-400" />
                         <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-2">TIER</span>
-                        {[
-                            { label: 'TIER 1', value: 'TIER 1' },
-                            { label: 'TIER 2', value: 'TIER 2' },
-                            { label: 'TIER 3', value: 'TIER 3' },
-                            { label: 'БЕЗ TIER', value: 'NONE' }
-                        ].map(tier => (
+                        {tierRoles.map(tier => (
                             <button
-                                key={tier.value}
-                                onClick={() => setSelectedTiers(prev => prev.includes(tier.value) ? prev.filter(t => t !== tier.value) : [...prev, tier.value])}
+                                key={tier.id}
+                                onClick={() => setSelectedTiers(prev => prev.includes(tier.id) ? prev.filter(t => t !== tier.id) : [...prev, tier.id])}
                                 className={cn(
                                     "px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all",
-                                    selectedTiers.includes(tier.value) 
-                                        ? "bg-slate-800 text-white shadow-md shadow-slate-800/20" 
+                                    selectedTiers.includes(tier.id) 
+                                        ? "text-white shadow-md" 
                                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                                 )}
+                                style={selectedTiers.includes(tier.id) ? { backgroundColor: tier.color } : {}}
                             >
-                                {tier.label}
+                                {tier.name}
                             </button>
                         ))}
+                        <button
+                            onClick={() => setSelectedTiers(prev => prev.includes('NONE') ? prev.filter(t => t !== 'NONE') : [...prev, 'NONE'])}
+                            className={cn(
+                                "px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all",
+                                selectedTiers.includes('NONE') 
+                                    ? "bg-slate-800 text-white shadow-md shadow-slate-800/20" 
+                                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            )}
+                        >
+                            БЕЗ TIER
+                        </button>
                     </div>
                 </div>
             </div>
 
-            <div className="flex-1 bg-white rounded-2xl border border-slate-200/60 shadow-sm overflow-hidden flex flex-col">
+            <div className="flex-1 bg-white rounded-[24px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col">
                 {isLoading ? (
                     <div className="flex-1 flex items-center justify-center">
                         <div className="w-8 h-8 rounded-full border-4 border-slate-900 border-t-transparent animate-spin"></div>
@@ -259,20 +312,20 @@ export function Members() {
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="border-b border-slate-100 bg-slate-50/50">
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-[280px]">Пользователь</th>
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider w-[25%] text-center">NICK | STATIC</th>
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">Роль</th>
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-center">TIER</th>
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Управление</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[280px]">Пользователь</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[25%] text-center">NICK | STATIC</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Роль</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">TIER</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Управление</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {paginatedMembers.map(member => (
-                                    <tr key={member.id} className="hover:bg-slate-50/30 transition-colors group">
-                                        <td className="px-4 py-2.5">
+                                    <tr key={member.id} className="hover:bg-slate-50/50 transition-colors group">
+                                        <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
                                                 <img 
-                                                    src={member.discordAvatarUrl || `https://ui-avatars.com/api/?name=${member.discordUsername}&background=random`} 
+                                                    src={member.discordAvatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(member.discordUsername)}&background=random`} 
                                                     alt={member.discordUsername} 
                                                     className="w-9 h-9 rounded-full ring-2 ring-white shadow-sm"
                                                 />
@@ -282,36 +335,40 @@ export function Members() {
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-2.5">
+                                        <td className="px-6 py-4">
                                             <div className="flex flex-col items-center justify-center">
-                                                <p className="text-[13px] font-bold text-slate-900">{member.gameNickname}</p>
+                                                <p className="text-[13px] font-bold text-slate-900">{member.gameNickname || '—'}</p>
                                                 <p className="text-[11px] text-slate-500 font-mono mt-0.5 flex items-center gap-1">
-                                                    #{member.gameStaticId}
+                                                    #{member.gameStaticId || '—'}
                                                 </p>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-2.5 text-center">
-                                            {getRoleBadge(member.role)}
+                                        <td className="px-6 py-4 text-center">
+                                            {getRoleBadge(member.roleId)}
                                         </td>
-                                        <td className="px-4 py-2.5 text-center">
-                                            {getTierBadge(member.tier)}
+                                        <td className="px-6 py-4 text-center">
+                                            {getTierBadge(member.tierRoleId)}
                                         </td>
-                                        <td className="px-4 py-2.5 text-right">
+                                        <td className="px-6 py-4 text-right">
                                             <div className="flex justify-end gap-1 text-[12px]">
-                                                <button 
-                                                    onClick={() => openProfile(member)}
-                                                    className="w-8 h-8 flex items-center justify-center text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-all shadow-sm active:scale-[0.98]"
-                                                    title="Профиль участника"
-                                                >
-                                                    <UserCog className="w-4 h-4" />
-                                                </button>
-                                                <button 
-                                                    onClick={() => openKick(member)}
-                                                    className="w-8 h-8 flex items-center justify-center text-rose-500 bg-rose-50 border border-rose-100 hover:bg-rose-100 hover:text-rose-700 rounded-lg transition-all shadow-sm active:scale-[0.98]"
-                                                    title="Исключить участника"
-                                                >
-                                                    <UserX className="w-4 h-4" />
-                                                </button>
+                                                {canEdit && (
+                                                    <button 
+                                                        onClick={() => openProfile(member)}
+                                                        className="w-8 h-8 flex items-center justify-center text-slate-500 bg-white border border-slate-200 hover:bg-slate-50 hover:text-slate-900 rounded-lg transition-all shadow-sm active:scale-[0.98]"
+                                                        title="Профиль участника"
+                                                    >
+                                                        <UserCog className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                                {canKick && (
+                                                    <button 
+                                                        onClick={() => openKick(member)}
+                                                        className="w-8 h-8 flex items-center justify-center text-rose-600 bg-rose-50/50 hover:bg-rose-100 rounded-lg transition-all shadow-sm active:scale-[0.98] border border-rose-100"
+                                                        title="Исключить участника"
+                                                    >
+                                                        <UserX className="w-4 h-4" />
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -320,25 +377,23 @@ export function Members() {
                         </table>
                     </div>
                 )}
-                
-                {/* Pagination Controls */}
                 {totalPages > 1 && (
-                    <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-t border-slate-200/60 rounded-b-2xl">
-                        <span className="text-[13px] font-medium text-slate-500">
-                            Страница <span className="font-bold text-slate-700">{currentPage}</span> из <span className="font-bold text-slate-700">{totalPages}</span>
+                    <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/50">
+                        <span className="text-[12px] font-medium text-slate-500">
+                            Страница {currentPage} из {totalPages}
                         </span>
-                        <div className="flex gap-2">
-                            <button
-                                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                        <div className="flex gap-1.5">
+                            <button 
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                                 disabled={currentPage === 1}
-                                className="px-4 py-2 text-[12px] font-bold rounded-xl transition-all disabled:opacity-50 disabled:pointer-events-none bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 shadow-sm active:scale-[0.98]"
+                                className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white transition-colors"
                             >
                                 Назад
                             </button>
-                            <button
-                                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                            <button 
+                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                                 disabled={currentPage === totalPages}
-                                className="px-4 py-2 text-[12px] font-bold rounded-xl transition-all disabled:opacity-50 disabled:pointer-events-none bg-indigo-600 text-white hover:bg-indigo-700 shadow-md shadow-indigo-600/20 active:scale-[0.98]"
+                                className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white transition-colors"
                             >
                                 Вперед
                             </button>
@@ -347,176 +402,221 @@ export function Members() {
                 )}
             </div>
 
-            {/* Profile Modal */}
+            {/* Modal: Edit Member */}
             {editMember && createPortal(
-                <div 
-                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300"
-                    onClick={closeModals}
-                >
-                    <div 
-                        className="bg-white rounded-3xl shadow-2xl w-full max-w-sm flex flex-col animate-in slide-in-from-bottom-8 fade-in duration-300 border border-slate-100/50 overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="px-6 py-5 border-b border-slate-100/80 flex justify-between items-center bg-slate-50/50">
-                            <div>
-                                <h2 className="text-[18px] font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                                    <UserCog className="w-5 h-5 text-indigo-600" /> Профиль участника
-                                </h2>
-                                <p className="text-[12px] text-slate-500 font-medium mt-0.5 ml-7">{editMember.discordUsername}</p>
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-[24px] shadow-2xl w-full max-w-[420px] overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
+                        <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center">
+                                    <UserCog className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-[16px] font-bold text-slate-900 leading-tight">Профиль участника</h3>
+                                    <p className="text-[12px] text-slate-500 font-medium">Редактирование данных</p>
+                                </div>
                             </div>
-                            <button 
-                                onClick={closeModals}
-                                className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 rounded-full transition-colors"
-                            >
-                                <X className="w-4 h-4" />
+                            <button onClick={closeModals} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-white rounded-xl transition-colors">
+                                <X className="w-5 h-5" />
                             </button>
                         </div>
-                        
-                        <div className="p-6 space-y-4">
-                            <div className="flex gap-4">
-                                <div className="flex-1">
-                                    <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider pl-1">Игровой никнейм</label>
-                                    <input 
-                                        type="text" 
-                                        value={editNick}
-                                        onChange={e => setEditNick(formatNick(e.target.value))}
-                                        className="w-full px-4 py-2.5 bg-slate-50/80 border border-slate-200 text-[13px] font-bold text-slate-900 rounded-xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder:font-medium placeholder:text-slate-400"
-                                    />
-                                </div>
-                                <div className="w-[100px]">
-                                    <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider pl-1">Статик</label>
-                                    <input 
-                                        type="text" 
-                                        value={editStatic}
-                                        onChange={e => setEditStatic(e.target.value.replace(/\D/g, ''))}
-                                        maxLength={6}
-                                        className="w-full px-4 py-2.5 bg-slate-50/80 border border-slate-200 text-[13px] font-bold text-slate-900 font-mono rounded-xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-center placeholder:font-medium placeholder:text-slate-400"
-                                    />
+
+                        <div className="p-6 overflow-y-auto">
+                            <div className="mb-6 flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                                <img 
+                                    src={editMember.discordAvatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(editMember.discordUsername)}&background=random`} 
+                                    alt="avatar" 
+                                    className="w-12 h-12 rounded-full shadow-sm ring-2 ring-white" 
+                                />
+                                <div>
+                                    <p className="text-[14px] font-bold text-slate-900 leading-snug">{editMember.discordUsername}</p>
+                                    <p className="text-[11px] text-slate-500 font-mono mt-0.5">{editMember.discordId}</p>
                                 </div>
                             </div>
-                            
-                            <div className="flex gap-4">
-                                <div className="flex-1">
-                                    <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider pl-1">Роль в Discord</label>
-                                    <select 
-                                        value={editRole}
-                                        onChange={e => setEditRole(e.target.value as any)}
-                                        className="w-full px-4 py-2.5 bg-slate-50/80 border border-slate-200 text-[13px] font-bold text-slate-900 rounded-xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all appearance-none cursor-pointer"
-                                    >
-                                        <option value="NEWKINGSIZE">NEWKINGSIZE</option>
-                                        <option value="KINGSIZE">KINGSIZE</option>
-                                    </select>
+
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block ml-1">Nickname</label>
+                                        <input 
+                                            type="text" 
+                                            value={editNick}
+                                            onChange={(e) => setEditNick(formatNick(e.target.value))}
+                                            placeholder="Имя Фамилия"
+                                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block ml-1">Static ID</label>
+                                        <input 
+                                            type="text" 
+                                            value={editStatic}
+                                            onChange={(e) => setEditStatic(e.target.value.replace(/\D/g, '').slice(0,6))}
+                                            placeholder="12345"
+                                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] font-medium text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
+                                        />
+                                    </div>
                                 </div>
-                                <div className="flex-1">
-                                    <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider pl-1">Ранг (TIER)</label>
-                                    <select 
-                                        value={editTier}
-                                        onChange={e => setEditTier(e.target.value as any)}
-                                        className="w-full px-4 py-2.5 bg-slate-50/80 border border-slate-200 text-[13px] font-bold text-slate-900 rounded-xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all appearance-none cursor-pointer text-center"
-                                    >
-                                        <option value="NONE">БЕЗ TIER</option>
-                                        <option value="TIER 1">TIER 1</option>
-                                        <option value="TIER 2">TIER 2</option>
-                                        <option value="TIER 3">TIER 3</option>
-                                    </select>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block ml-1">Роль</label>
+                                        <select 
+                                            value={editRoleId || ''}
+                                            onChange={(e) => setEditRoleId(e.target.value)}
+                                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm appearance-none cursor-pointer"
+                                        >
+                                            <option value="" disabled>Выберите роль</option>
+                                            {mainRoles.map(role => (
+                                                <option key={role.id} value={role.id}>{role.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block ml-1">TIER</label>
+                                        <select 
+                                            value={editTierRoleId || 'NONE'}
+                                            onChange={(e) => setEditTierRoleId(e.target.value === 'NONE' ? null : e.target.value)}
+                                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] font-bold text-slate-700 font-mono focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-500 transition-all shadow-sm appearance-none cursor-pointer"
+                                        >
+                                            <option value="NONE">БЕЗ TIER</option>
+                                            {tierRoles.map(tier => (
+                                                <option key={tier.id} value={tier.id}>{tier.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
-                            
-                            {errorMsg && <p className="text-rose-500 text-[11px] font-semibold mt-1.5 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{errorMsg}</p>}
+
+                            {errorMsg && (
+                                <div className="mt-5 p-3 rounded-xl bg-rose-50 border border-rose-100 flex gap-2.5 text-rose-600 animate-in slide-in-from-top-2">
+                                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                                    <p className="text-[12px] font-medium leading-relaxed">{errorMsg}</p>
+                                </div>
+                            )}
                         </div>
-                        
-                        <div className="px-6 pb-6 pt-2 flex gap-3">
-                            <button 
-                                onClick={closeModals}
-                                className="flex-1 py-3 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-2xl text-[13px] font-bold transition-all active:scale-[0.98]"
-                            >
-                                Отмена
-                            </button>
+
+                        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex gap-3">
                             <button 
                                 onClick={handleSave}
                                 disabled={updateMemberMutation.isPending}
-                                className="flex-1 py-3 bg-indigo-600 text-white hover:bg-indigo-700 rounded-2xl text-[13px] font-bold transition-all shadow-lg shadow-indigo-600/30 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
+                                className="flex-1 py-2.5 bg-slate-900 text-white rounded-xl text-[13px] font-bold hover:bg-slate-800 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50"
                             >
-                                Сохранить
+                                {updateMemberMutation.isPending ? 'Сохранение...' : 'Сохранить изменения'}
                             </button>
-                        </div>
-                    </div>
-                </div>,
-                document.body
-            )}
-
-            {/* Kick Modal */}
-            {kickMember && createPortal(
-                <div 
-                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300"
-                    onClick={closeModals}
-                >
-                    <div 
-                        className="bg-white rounded-3xl shadow-2xl w-full max-w-sm flex flex-col animate-in zoom-in-95 fade-in duration-300 border border-slate-100/50 overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="pt-8 px-6 pb-2 text-center flex flex-col items-center">
-                            <div className="w-14 h-14 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mb-4 ring-4 ring-rose-50">
-                                <UserX className="w-7 h-7" />
-                            </div>
-                            <h2 className="text-[20px] font-bold text-slate-900 tracking-tight mb-1">Исключить участника</h2>
-                            <p className="text-[13px] text-slate-500 font-medium px-4">Вы собираетесь удалить <span className="font-bold text-slate-700">{kickMember.discordUsername}</span> из состава.</p>
-                        </div>
-                        
-                        <div className="px-6 py-4 space-y-5">
-                            <div>
-                                <label className="block text-[11px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider pl-1">Причина исключения <span className="text-rose-500">*</span></label>
-                                <textarea 
-                                    value={kickReason}
-                                    onChange={e => setKickReason(e.target.value)}
-                                    placeholder="Нарушение правил, неактив и т.д."
-                                    rows={3}
-                                    className="w-full px-4 py-3 bg-slate-50/80 border border-slate-200 text-[13px] font-medium text-slate-900 rounded-2xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all placeholder:text-slate-400 resize-none"
-                                />
-                                {kickErrorMsg && <p className="text-rose-500 text-[11px] font-semibold mt-1.5 flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{kickErrorMsg}</p>}
-                            </div>
-
-                            <div className="flex items-center justify-between bg-slate-50 border border-slate-200 p-4 rounded-2xl">
-                                <div className="flex flex-col">
-                                    <span className="text-[13px] font-bold text-slate-900 flex items-center gap-1.5"><ShieldAlert className="w-4 h-4 text-rose-500" /> Черный список (ЧС)</span>
-                                    <span className="text-[11px] font-medium text-slate-500 mt-0.5 max-w-[200px] leading-snug">Запрет на подачу заявок в будущем</span>
-                                </div>
-                                <button 
-                                    className={cn(
-                                        "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none",
-                                        addToBlacklist ? "bg-rose-500" : "bg-slate-300"
-                                    )}
-                                    onClick={() => setAddToBlacklist(!addToBlacklist)}
-                                >
-                                    <span 
-                                        className={cn(
-                                            "inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ease-in-out shadow-sm",
-                                            addToBlacklist ? "translate-x-6" : "translate-x-1"
-                                        )}
-                                    />
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div className="px-6 pb-6 pt-2 flex gap-3">
                             <button 
                                 onClick={closeModals}
-                                className="flex-1 py-3 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-2xl text-[13px] font-bold transition-all active:scale-[0.98]"
+                                className="px-5 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-[13px] font-bold hover:bg-slate-50 transition-all shadow-sm"
                             >
                                 Отмена
                             </button>
+                        </div>
+                    </div>
+                </div>
+            , document.body)}
+
+            {/* Modal: Kick Member */}
+            {kickMember && createPortal(
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-[24px] shadow-2xl w-full max-w-[420px] overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
+                        <div className="px-6 py-5 border-b border-rose-100 flex justify-between items-center bg-rose-50/30">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center">
+                                    <UserX className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-[16px] font-bold text-rose-950 leading-tight">Исключение участника</h3>
+                                    <p className="text-[12px] text-rose-600/70 font-medium">Это действие необратимо</p>
+                                </div>
+                            </div>
+                            <button onClick={closeModals} className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto">
+                            <div className="mb-6 flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                                <div className="flex items-center gap-3">
+                                    <img 
+                                        src={kickMember.discordAvatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(kickMember.discordUsername)}&background=random`} 
+                                        alt="avatar" 
+                                        className="w-10 h-10 rounded-full shadow-sm ring-2 ring-white" 
+                                    />
+                                    <div>
+                                        <p className="text-[14px] font-bold text-slate-900 leading-snug">{kickMember.discordUsername}</p>
+                                        <p className="text-[11px] text-slate-500 font-mono mt-0.5">{kickMember.discordId}</p>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-[13px] font-bold text-slate-900">{kickMember.gameNickname}</p>
+                                    <p className="text-[11px] text-slate-500 font-mono mt-0.5">#{kickMember.gameStaticId}</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-5">
+                                <div>
+                                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block ml-1 flex items-center justify-between">
+                                        <span>Причина исключения</span>
+                                        <span className="text-rose-400">*</span>
+                                    </label>
+                                    <textarea 
+                                        value={kickReason}
+                                        onChange={(e) => setKickReason(e.target.value)}
+                                        placeholder="Обязательно укажите причину кика (видна в логах и архиве)..."
+                                        rows={3}
+                                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-[13px] font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all shadow-sm resize-none custom-scrollbar"
+                                    />
+                                </div>
+
+                                <label className="flex items-start gap-3 p-4 border border-rose-100 rounded-2xl cursor-pointer hover:bg-rose-50/50 transition-colors group">
+                                    <div className="relative flex items-center mt-0.5">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={addToBlacklist}
+                                            onChange={(e) => setAddToBlacklist(e.target.checked)}
+                                            className="peer sr-only"
+                                        />
+                                        <div className="w-5 h-5 border-2 border-slate-300 rounded peer-checked:bg-rose-500 peer-checked:border-rose-500 transition-colors flex items-center justify-center group-hover:border-rose-400 peer-checked:group-hover:border-rose-500">
+                                            <svg className="w-3.5 h-3.5 text-white opacity-0 peer-checked:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <p className="text-[13px] font-bold text-rose-900 flex items-center gap-1.5">
+                                            Занести в Черный список (ЧС)
+                                            <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
+                                        </p>
+                                        <p className="text-[11px] text-rose-600/70 mt-1 leading-snug">Участник потеряет возможность оставлять заявки, бот не будет на него реагировать.</p>
+                                    </div>
+                                </label>
+                            </div>
+
+                            {kickErrorMsg && (
+                                <div className="mt-5 p-3 rounded-xl bg-orange-50 border border-orange-100 flex gap-2.5 text-orange-700 animate-in slide-in-from-top-2">
+                                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                                    <p className="text-[12px] font-medium leading-relaxed">{kickErrorMsg}</p>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="px-6 py-4 border-t border-rose-100 bg-rose-50/30 flex gap-3">
                             <button 
                                 onClick={handleKick}
-                                disabled={kickMemberMutation.isPending || !kickReason.trim()}
-                                className="flex-1 py-3 bg-rose-500 text-white hover:bg-rose-600 rounded-2xl text-[13px] font-bold transition-all shadow-lg shadow-rose-500/30 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none"
+                                disabled={kickMemberMutation.isPending}
+                                className="flex-1 py-2.5 bg-rose-600 text-white rounded-xl text-[13px] font-bold hover:bg-rose-700 active:scale-[0.98] transition-all shadow-[0_2px_12px_rgba(225,29,72,0.2)] disabled:opacity-50"
                             >
-                                Изгнать
+                                {kickMemberMutation.isPending ? 'Выполнение...' : 'Подтвердить исключение'}
+                            </button>
+                            <button 
+                                onClick={closeModals}
+                                className="px-5 py-2.5 bg-white border border-rose-200 text-rose-700 rounded-xl text-[13px] font-bold hover:bg-rose-50 transition-all shadow-sm"
+                            >
+                                Отмена
                             </button>
                         </div>
                     </div>
-                </div>,
-                document.body
-            )}
+                </div>
+            , document.body)}
         </div>
     );
 }
+

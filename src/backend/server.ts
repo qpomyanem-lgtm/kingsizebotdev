@@ -13,6 +13,7 @@ import memberRoutes from './routes/members';
 import afkRoutes from './routes/afk';
 import mapsRoutes from './routes/maps';
 import activityRoutes from './routes/activity';
+import accessRoutes from './routes/access';
 
 // Declare FastifyInstance to include io
 declare module 'fastify' {
@@ -82,6 +83,7 @@ async function start() {
     await server.register(afkRoutes, { prefix: '/api/afk' });
     await server.register(mapsRoutes, { prefix: '/api/maps' });
     await server.register(activityRoutes, { prefix: '/api/activity' });
+    await server.register(accessRoutes, { prefix: '/api/access-roles' });
 
 
     const io = new Server(server.server, {
