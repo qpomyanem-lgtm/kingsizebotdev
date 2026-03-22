@@ -301,7 +301,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
 
         const eventTimeUnix = toUnixTs(event.eventTime);
         const voiceText = event.voiceChannelId ? `\n🔊 Голосовой канал: <#${event.voiceChannelId}>` : '';
-        const dmText = `📢 **Напоминание о мероприятии!**\n⏰ Время: <t:${eventTimeUnix}:F> (<t:${eventTimeUnix}:R>)${voiceText}`;
+        const dmText = `📢 **Напоминание о списке!**\n⏰ Время: <t:${eventTimeUnix}:F> (<t:${eventTimeUnix}:R>)${voiceText}`;
 
         // Send DM to each participant
         let sent = 0;
