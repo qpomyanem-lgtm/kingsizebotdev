@@ -117,6 +117,7 @@ export const events = pgTable('events', {
   status: text('status', { enum: ['Open', 'Closed'] }).default('Open').notNull(),
   groupCode: text('group_code'),
   mapId: text('map_id'),
+  voiceChannelId: text('voice_channel_id'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -126,6 +127,14 @@ export const eventParticipants = pgTable('event_participants', {
   userId: text('user_id').notNull(),
   tierRoleId: text('tier_role_id').references(() => roles.id),
   joinedAt: timestamp('joined_at').defaultNow().notNull(),
+});
+
+export const eventLogs = pgTable('event_logs', {
+  id: text('id').primaryKey(),
+  eventId: text('event_id').notNull().references(() => events.id),
+  userId: text('user_id').notNull(),
+  action: text('action', { enum: ['join', 'leave', 'removed'] }).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 export const interviewMessages = pgTable('interview_messages', {

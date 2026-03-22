@@ -1,13 +1,16 @@
 import {
     ButtonInteraction,
+    Client,
     ContainerBuilder,
     GuildMember,
     MessageFlags,
     ModalSubmitInteraction,
+    TextBasedChannel,
     TextDisplayBuilder,
 } from 'discord.js';
 import { db } from '../../../../db';
-import { events } from '../../../../db/schema';
+import { events, systemSettings } from '../../../../db/schema';
+import { eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { canCreateEvents, EVENT_TYPE_LABELS } from './eventShared';
 import { refreshEventEmbed } from './eventEmbedPayload.js';
@@ -29,15 +32,13 @@ export async function handleEventCreateBtn(interaction: ButtonInteraction) {
         components: [
             {
                 type: 18, // Label
-                label: 'Тип мероприятия',
-                description: 'Выберите тип мероприятия для списка',
+                label: 'Выберите тип списка:',
                 component: {
                     type: 21, // RadioGroup
                     custom_id: 'event_type_radio',
                     options: [
-                        { value: 'MCL', label: 'MCL', description: 'MCL мероприятие' },
-                        { value: 'ВЗЗ', label: 'ВЗЗ', description: 'ВЗЗ мероприятие' },
-                        { value: 'Capt', label: 'Капт', description: 'Капт мероприятие' },
+                        { value: 'MCL', label: 'Создать список на MCL / ВЗЗ' },
+                        { value: 'Capt', label: 'Создать список на капт' },
                     ],
                 },
             },
@@ -47,8 +48,7 @@ export async function handleEventCreateBtn(interaction: ButtonInteraction) {
                     {
                         type: 4, // TextInput
                         custom_id: 'timeInput',
-                        label: 'Время (МСК)',
-                        placeholder: 'Например, 18:30',
+                        label: 'Время проведения(МСК):',
                         style: 1, // Short
                         required: true,
                     },
@@ -59,22 +59,8 @@ export async function handleEventCreateBtn(interaction: ButtonInteraction) {
                 components: [
                     {
                         type: 4,
-                        custom_id: 'dateInput',
-                        label: 'Дата (необязательно)',
-                        placeholder: 'Например, 25.03',
-                        style: 1,
-                        required: false,
-                    },
-                ],
-            },
-            {
-                type: 1,
-                components: [
-                    {
-                        type: 4,
                         custom_id: 'slotsInput',
-                        label: 'Количество слотов',
-                        placeholder: '10',
+                        label: 'Количество слотов:',
                         style: 1,
                         required: true,
                     },
@@ -95,17 +81,17 @@ export async function handleEventCreateModalSubmit(interaction: ModalSubmitInter
 
     // Extract radio value for event type from raw components
     const rawComponents = (interaction as any).components ?? [];
-    let eventType: 'Capt' | 'MCL' | 'ВЗЗ' = 'MCL'; // fallback
+    type EventType = 'Capt' | 'MCL' | 'ВЗЗ';
+    let eventType: EventType = 'MCL'; // fallback
     for (const comp of rawComponents) {
         const inner = comp.components?.[0] ?? comp.component;
         if (inner?.customId === 'event_type_radio' || inner?.custom_id === 'event_type_radio') {
-            eventType = (inner.value ?? 'MCL') as typeof eventType;
+            eventType = (inner.value ?? 'MCL') as EventType;
             break;
         }
     }
 
     const time = interaction.fields.getTextInputValue('timeInput');
-    const date = interaction.fields.getTextInputValue('dateInput');
     const slotsStr = interaction.fields.getTextInputValue('slotsInput');
 
     const slots = parseInt(slotsStr, 10);
@@ -126,34 +112,17 @@ export async function handleEventCreateModalSubmit(interaction: ModalSubmitInter
     // Get current Moscow time for date defaults
     const nowMoscow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
 
-    let day: number, month: number, year: number;
-    if (date) {
-        const dateMatch = date.match(/(\d{1,2})\D+(\d{1,2})(?:\D+(\d{2,4}))?/);
-        if (dateMatch) {
-            day = Math.min(parseInt(dateMatch[1], 10), 31);
-            month = Math.max(1, Math.min(parseInt(dateMatch[2], 10), 12));
-            year = dateMatch[3] ? parseInt(dateMatch[3], 10) : nowMoscow.getFullYear();
-            if (year < 100) year += 2000;
-        } else {
-            day = nowMoscow.getDate();
-            month = nowMoscow.getMonth() + 1;
-            year = nowMoscow.getFullYear();
-        }
-    } else {
-        // No date provided — use today (or tomorrow if time already passed)
-        day = nowMoscow.getDate();
-        month = nowMoscow.getMonth() + 1;
-        year = nowMoscow.getFullYear();
+    // Auto-detect date: today or tomorrow if time already passed
+    let day = nowMoscow.getDate();
+    let month = nowMoscow.getMonth() + 1;
+    let year = nowMoscow.getFullYear();
 
-        // Check if the time already passed today in Moscow
-        if (hours < nowMoscow.getHours() || (hours === nowMoscow.getHours() && minutes <= nowMoscow.getMinutes())) {
-            // Advance to tomorrow
-            const tomorrow = new Date(nowMoscow);
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            day = tomorrow.getDate();
-            month = tomorrow.getMonth() + 1;
-            year = tomorrow.getFullYear();
-        }
+    if (hours < nowMoscow.getHours() || (hours === nowMoscow.getHours() && minutes <= nowMoscow.getMinutes())) {
+        const tomorrow = new Date(nowMoscow);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        day = tomorrow.getDate();
+        month = tomorrow.getMonth() + 1;
+        year = tomorrow.getFullYear();
     }
 
     // Build ISO string with Moscow offset (+03:00) — this correctly converts to UTC
@@ -161,12 +130,39 @@ export async function handleEventCreateModalSubmit(interaction: ModalSubmitInter
     const isoMoscow = `${year}-${pad(month)}-${pad(day)}T${pad(hours)}:${pad(minutes)}:00+03:00`;
     const utcDate = new Date(isoMoscow);
 
-    if (!interaction.channel || interaction.channel.isDMBased() || !('send' in interaction.channel)) {
-        await interaction.editReply({ content: 'Невозможно отправить сообщение в этот канал.' });
+    // Determine target channel from system settings based on event type
+    const channelSettingKey = eventType === 'Capt' ? 'EVENT_CAPT_CHANNEL_ID' : 'EVENT_MCL_CHANNEL_ID';
+    const [channelSetting] = await db
+        .select()
+        .from(systemSettings)
+        .where(eq(systemSettings.key, channelSettingKey));
+
+    const targetChannelId = channelSetting?.value;
+    if (!targetChannelId) {
+        await interaction.editReply({
+            content: `Канал для ${EVENT_TYPE_LABELS[eventType] ?? eventType} не настроен. Попросите администратора указать канал в настройках.`,
+        });
         return;
     }
 
-    const msg = await interaction.channel.send({
+    const client = interaction.client as Client;
+    let targetChannel: TextBasedChannel;
+    try {
+        const fetched = await client.channels.fetch(targetChannelId);
+        if (!fetched || !fetched.isTextBased() || !('send' in fetched)) {
+            await interaction.editReply({ content: 'Настроенный канал недоступен или не является текстовым.' });
+            return;
+        }
+        targetChannel = fetched as TextBasedChannel;
+    } catch {
+        await interaction.editReply({ content: 'Не удалось получить настроенный канал. Проверьте ID в настройках.' });
+        return;
+    }
+
+    // @everyone ping — отдельным сообщением, т.к. Components V2 не поддерживает content
+    await (targetChannel as any).send({ content: '@everyone' }).catch(() => {});
+
+    const msg = await (targetChannel as any).send({
         components: [new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent('Загрузка списка...'))],
         flags: MessageFlags.IsComponentsV2,
     });

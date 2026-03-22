@@ -11,7 +11,7 @@ import { handleAfkStartBtn, handleAfkEndBtn } from '../events/interactions/afkBu
 import { handleAfkModalSubmit } from '../events/interactions/afkModalSubmit.js';
 import { checkExpiredAfks } from '../lib/afkEmbed.js';
 import { refreshServerOnlineEmbed } from '../lib/serverStatusEmbed.js';
-import { handleEventCreateBtn, handleEventCreateModalSubmit, handleEventActionBtn, handleEventSetGroupModalSubmit, handleEventMapModalSubmit, refreshEventEmbed } from '../events/interactions/eventInteractions.js';
+import { handleEventCreateBtn, handleEventCreateModalSubmit, handleEventActionBtn, handleEventRemoveModalSubmit, handleEventSetGroupModalSubmit, handleEventMapModalSubmit, handleEventSetVoiceModalSubmit, refreshEventEmbed } from '../events/interactions/eventInteractions.js';
 import { handleInterviewReadyBtn } from '../events/interactions/interviewReady.js';
 import { createActivityThreadIpc, handleActivityForumMessage, handleActivityUploadBtn, handleActivityModalSubmit, handleActivityReaction, rebuildActivityFromForum, closeActivityThread, isActivityExpired } from '../events/interactions/activityInteractions.js';
 import { checkAndDeployEmbeds } from '../lib/embedDeployer.js';
@@ -701,6 +701,10 @@ export async function loadEvents(client: Client) {
                 await handleEventSetGroupModalSubmit(interaction).catch(console.error);
             } else if (interaction.customId.startsWith('event_map_modal_')) {
                 await handleEventMapModalSubmit(interaction).catch(console.error);
+            } else if (interaction.customId.startsWith('event_remove_modal_')) {
+                await handleEventRemoveModalSubmit(interaction).catch(console.error);
+            } else if (interaction.customId.startsWith('event_setvoice_modal_')) {
+                await handleEventSetVoiceModalSubmit(interaction).catch(console.error);
             } else if (interaction.customId.startsWith('activity_modal_')) {
                 const rawData = activityModalRawCache.get(interaction.customId);
                 activityModalRawCache.delete(interaction.customId);

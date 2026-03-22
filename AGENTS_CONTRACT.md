@@ -439,6 +439,8 @@ Used by the Access Settings page. Manages roles with `type='access'` and their p
 - `GUILD_ID` (Discord guild id)
 - `TICKETS_CHANNEL_ID`, `TICKETS_MESSAGE_ID`
 - `EVENTS_CHANNEL_ID`, `EVENTS_MESSAGE_ID`
+- `EVENT_MCL_CHANNEL_ID` (канал для отправки списков MCL/ВЗЗ)
+- `EVENT_CAPT_CHANNEL_ID` (канал для отправки списков Капт)
 - `ONLINE_CHANNEL_ID`, `ONLINE_MESSAGE_ID`
 - `AFK_CHANNEL_ID`, `AFK_MESSAGE_ID`
 - `ACTIVITY_FORUM_CHANNEL_ID`

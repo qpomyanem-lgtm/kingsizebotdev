@@ -90,11 +90,15 @@ export async function getEventEmbedPayload(eventId: string): Promise<any | null>
         infoText += `\n**◆ Группа:** ||${event.groupCode}||`;
     }
 
+    if (event.voiceChannelId) {
+        infoText += `\n**◆ Голосовой канал:** <#${event.voiceChannelId}>`;
+    }
+
     // Title with custom emoji for MCL
     const titleMap: Record<string, string> = {
-        MCL: '<:mcl:1483873638255034388> MCL',
-        'ВЗЗ': 'ВЗЗ',
-        Capt: 'Капт',
+        MCL: '<:mcl:1485301422688829582> Список на MCL / ВЗЗ',
+        'ВЗЗ': 'Список на MCL / ВЗЗ',
+        Capt: '<:cpt:1485302217048326145> Список на капт',
     };
     const title = titleMap[event.eventType] ?? event.eventType;
 
@@ -138,6 +142,7 @@ export async function getEventEmbedPayload(eventId: string): Promise<any | null>
                         type: 2,
                         style: joinLeaveDisabled ? 2 : 1,
                         label: 'Присоединиться',
+                        emoji: { id: '1485303136049430719', name: 'plus' },
                         custom_id: `event_join_${eventId}`,
                         disabled: joinLeaveDisabled,
                     },
@@ -179,6 +184,7 @@ export async function getEventEmbedPayload(eventId: string): Promise<any | null>
             new ButtonBuilder()
                 .setCustomId(`event_join_${eventId}`)
                 .setLabel('Присоединиться')
+                .setEmoji({ id: '1485303136049430719', name: 'plus' })
                 .setStyle(joinLeaveOff ? ButtonStyle.Secondary : ButtonStyle.Primary)
                 .setDisabled(joinLeaveOff),
             new ButtonBuilder()
