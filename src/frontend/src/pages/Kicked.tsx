@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPortal } from 'react-dom';
 import { api } from '../lib/api';
@@ -56,14 +56,24 @@ export function Kicked() {
             const matchesSearch = !query ||
                 member.discordUsername.toLowerCase().includes(query) ||
                 member.discordId.includes(query) ||
-                member.gameNickname.toLowerCase().includes(query) ||
-                member.gameStaticId.toLowerCase().includes(query);
+                member.gameNickname.toLowerCase().includes(query);
 
             const matchesStatus = statusFilter === 'all' || member.status === statusFilter;
 
             return matchesSearch && matchesStatus;
         });
     }, [kickedMembers, searchQuery, statusFilter]);
+
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 20;
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [statusFilter, searchQuery]);
+
+    const totalPages = Math.ceil((filteredMembers?.length || 0) / ITEMS_PER_PAGE);
+    const paginatedMembers = filteredMembers.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
     return (
         <div className="h-full flex flex-col font-sans">
@@ -94,7 +104,7 @@ export function Kicked() {
                     </div>
                     <input
                         type="text"
-                        placeholder="Поиск по Discord нику, Discord ID, Nickname, Static ID..."
+                        placeholder="Поиск по Discord нику, Discord ID, Nickname..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/60 rounded-xl text-[13px] font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
@@ -141,14 +151,14 @@ export function Kicked() {
                             <thead>
                                 <tr className="border-b border-slate-100 bg-slate-50/50">
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[280px]">Пользователь</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Игровые данные</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">NICKNAME</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Статус</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Дата и ответственный</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Действия</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {filteredMembers.map(member => (
+                                {paginatedMembers.map(member => (
                                     <tr key={member.id} className="hover:bg-slate-50/50 transition-colors">
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
@@ -166,7 +176,6 @@ export function Kicked() {
                                         <td className="px-6 py-4 text-center">
                                             <div className="flex flex-col items-center justify-center">
                                                 <p className="text-[13px] font-bold text-slate-900">{member.gameNickname}</p>
-                                                <p className="text-[11px] text-slate-500 font-mono mt-0.5">#{member.gameStaticId}</p>
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">
@@ -209,6 +218,29 @@ export function Kicked() {
                                 ))}
                             </tbody>
                         </table>
+                        {totalPages > 1 && (
+                            <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/50 mt-auto">
+                                <span className="text-[12px] font-medium text-slate-500">
+                                    Страница {currentPage} из {totalPages}
+                                </span>
+                                <div className="flex gap-1.5">
+                                    <button 
+                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                        disabled={currentPage === 1}
+                                        className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white transition-colors"
+                                    >
+                                        Назад
+                                    </button>
+                                    <button 
+                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                        disabled={currentPage === totalPages}
+                                        className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white transition-colors"
+                                    >
+                                        Вперед
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -253,15 +285,9 @@ export function Kicked() {
                             {/* Game Data */}
                             <section>
                                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Игровые данные</h3>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="bg-slate-50 rounded-xl px-4 py-3">
-                                        <p className="text-[11px] font-semibold text-slate-400 uppercase mb-1">Nick</p>
-                                        <p className="text-sm font-medium text-slate-900">{profileModal.gameNickname}</p>
-                                    </div>
-                                    <div className="bg-slate-50 rounded-xl px-4 py-3">
-                                        <p className="text-[11px] font-semibold text-slate-400 uppercase mb-1">Static</p>
-                                        <p className="text-sm font-medium text-slate-900">#{profileModal.gameStaticId}</p>
-                                    </div>
+                                <div className="bg-slate-50 rounded-xl px-4 py-3">
+                                    <p className="text-[11px] font-semibold text-slate-400 uppercase mb-1">Nick</p>
+                                    <p className="text-sm font-medium text-slate-900">{profileModal.gameNickname}</p>
                                 </div>
                             </section>
 

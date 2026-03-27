@@ -48,17 +48,12 @@ export function parseActivityThreadName(threadName: string) {
 
     if (!trimmed.toLowerCase().includes('актив')) return null;
 
-    const match = trimmed.match(/#(\d{1,10})/);
-    if (!match) return null;
-
-    const gameStaticId = match[1];
     const cleaned = trimmed
-        .replace(/#\d{1,10}/g, '')
         .replace(/^Активность\s*[:\-–—]?\s*/u, '')
         .replace(/^Активность\s*/u, '')
         .trim();
 
-    return { gameStaticId, gameNickname: cleaned || undefined };
+    return { gameNickname: cleaned || undefined };
 }
 
 export async function getActiveDmSession(discordId: string) {

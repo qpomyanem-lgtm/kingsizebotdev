@@ -2,37 +2,23 @@ import {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    ContainerBuilder,
-    MessageFlags,
-    SeparatorBuilder,
-    SeparatorSpacingSize,
-    TextDisplayBuilder,
 } from 'discord.js';
 
-export function buildTicketsPanelComponents(): { components: any[]; flags: number } {
-    const container = new ContainerBuilder()
-        .setAccentColor(0x5865f2)
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 📝 Подача заявки'))
-        .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
-        .addTextDisplayComponents(
-            new TextDisplayBuilder().setContent(
-                'Хотите вступить в нашу семью?\nНажмите кнопку ниже и заполните анкету — мы рассмотрим вашу заявку в кратчайшие сроки.',
-            ),
-        )
-        .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large))
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent('### 📋 Что нужно знать'))
-        .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
-        .addTextDisplayComponents(
-            new TextDisplayBuilder().setContent('✦ Ответьте на все вопросы максимально подробно\n✦ Укажите реальные данные вашего персонажа\n✦ Заявка будет рассмотрена администрацией'),
-        )
-        .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large))
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent('-# ⏳ Время ответа: обычно до 24 часов'))
-        .addActionRowComponents(
-            new ActionRowBuilder<ButtonBuilder>().addComponents(
-                new ButtonBuilder().setCustomId('ticket_apply_btn').setLabel('Подать заявку').setStyle(ButtonStyle.Primary).setEmoji('📝'),
-            ),
-        );
+const TICKET_IMAGE_URL = 'https://cdn.discordapp.com/attachments/1483197483344593020/1486719642117607615/Gemini_Generated_Image_m6632cm6632cm663.png?ex=69c68710&is=69c53590&hm=d1ca9f2f9b2dba4e24b186c4ac02ac31227c3455cd4d03535f30c995cf8783a4&';
 
-    return { components: [container], flags: MessageFlags.IsComponentsV2 };
+export function buildTicketsPanelPayload(applicationsOpen: boolean) {
+    const button = new ButtonBuilder()
+        .setCustomId('ticket_apply_btn')
+        .setLabel('ПОДАТЬ ЗАЯВКУ')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('1486745639260786748')
+        .setDisabled(!applicationsOpen);
+
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(button);
+
+    return {
+        content: TICKET_IMAGE_URL,
+        embeds: [],
+        components: [row],
+    };
 }
-

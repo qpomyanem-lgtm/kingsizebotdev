@@ -147,12 +147,22 @@ export function Activity() {
         !query ||
         row.discordUsername.toLowerCase().includes(query) ||
         row.discordId.includes(query) ||
-        row.gameNickname.toLowerCase().includes(query) ||
-        row.gameStaticId.toLowerCase().includes(query);
+        row.gameNickname.toLowerCase().includes(query);
 
       return matchesSearch;
     });
   }, [rows, searchQuery]);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, searchQuery]);
+
+  const totalPages = Math.ceil(filteredRows.length / ITEMS_PER_PAGE);
+  const paginatedRows = filteredRows.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   return (
     <div className="h-full flex flex-col font-sans relative">
@@ -180,7 +190,7 @@ export function Activity() {
             </div>
             <input
               type="text"
-              placeholder="Поиск по Discord нику, Discord ID, Nickname, Static ID..."
+              placeholder="Поиск по Discord нику, Discord ID, Nickname..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/60 rounded-xl text-[13px] font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
@@ -229,7 +239,7 @@ export function Activity() {
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/50">
                   <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[280px]">Пользователь</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">NICK | STATIC</th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">NICKNAME</th>
                   <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Скриншоты</th>
                   <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Дни</th>
                   <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Статус</th>
@@ -237,7 +247,7 @@ export function Activity() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredRows.map((r) => (
+                {paginatedRows.map((r) => (
                   <tr key={r.memberId} className="hover:bg-slate-50/50 transition-colors group">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
@@ -254,9 +264,8 @@ export function Activity() {
                     </td>
 
                     <td className="px-6 py-4 text-center">
-                      <div>
+                      <div className="flex flex-col items-center justify-center">
                         <p className="text-[13px] font-bold text-slate-900">{r.gameNickname}</p>
-                        <p className="text-[11px] text-slate-500 font-mono mt-0.5">#{r.gameStaticId}</p>
                       </div>
                     </td>
 
@@ -335,6 +344,29 @@ export function Activity() {
                 ))}
               </tbody>
             </table>
+            {totalPages > 1 && (
+              <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/50 mt-auto">
+                <span className="text-[12px] font-medium text-slate-500">
+                  Страница {currentPage} из {totalPages}
+                </span>
+                <div className="flex gap-1.5">
+                  <button 
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white transition-colors"
+                  >
+                    Назад
+                  </button>
+                  <button 
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white transition-colors"
+                  >
+                    Вперед
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -357,7 +389,7 @@ export function Activity() {
                   </h2>
                   {activeRow ? (
                     <p className="text-[12px] text-slate-500 font-medium mt-0.5">
-                      {activeRow.discordUsername} · {activeRow.nickStatic} · в семье: {formatFamilyDuration(activeRow.joinedAt)}
+                      {activeRow.discordUsername} · {activeRow.gameNickname} · в семье: {formatFamilyDuration(activeRow.joinedAt)}
                     </p>
                   ) : null}
                 </div>

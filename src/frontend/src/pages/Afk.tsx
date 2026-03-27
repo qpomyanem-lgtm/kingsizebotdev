@@ -79,6 +79,18 @@ export function Afk() {
 
         return matchesStatus && matchesSearch;
     }) || [];
+
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 20;
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [filter, searchQuery]);
+
+    const totalPages = Math.ceil(displayedAfks.length / ITEMS_PER_PAGE);
+    const paginatedAfks = displayedAfks.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
     const canEndAfk = !!(user?.permissions as string[] | undefined)?.includes('site:afk:actions');
 
     const getEndReasonBadge = (type: string | null, adminName: string | null) => {
@@ -173,7 +185,7 @@ export function Afk() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {displayedAfks.map(afk => (
+                                {paginatedAfks.map(afk => (
                                     <tr key={afk.id} className="hover:bg-slate-50/50 transition-colors group">
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
@@ -249,6 +261,29 @@ export function Afk() {
                                 ))}
                             </tbody>
                         </table>
+                        {totalPages > 1 && (
+                            <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/50 mt-auto">
+                                <span className="text-[12px] font-medium text-slate-500">
+                                    Страница {currentPage} из {totalPages}
+                                </span>
+                                <div className="flex gap-1.5">
+                                    <button 
+                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                        disabled={currentPage === 1}
+                                        className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white transition-colors"
+                                    >
+                                        Назад
+                                    </button>
+                                    <button 
+                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                        disabled={currentPage === totalPages}
+                                        className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white transition-colors"
+                                    >
+                                        Вперед
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

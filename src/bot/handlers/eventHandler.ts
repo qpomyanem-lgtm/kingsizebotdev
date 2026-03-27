@@ -11,7 +11,7 @@ import { handleAfkStartBtn, handleAfkEndBtn } from '../events/interactions/afkBu
 import { handleAfkModalSubmit } from '../events/interactions/afkModalSubmit.js';
 import { checkExpiredAfks } from '../lib/afkEmbed.js';
 import { refreshServerOnlineEmbed } from '../lib/serverStatusEmbed.js';
-import { handleEventCreateBtn, handleEventCreateModalSubmit, handleEventActionBtn, handleEventRemoveModalSubmit, handleEventSetGroupModalSubmit, handleEventMapModalSubmit, handleEventSetVoiceModalSubmit, refreshEventEmbed } from '../events/interactions/eventInteractions.js';
+import { handleEventCreateBtn, handleEventCreateModalSubmit, handleEventActionBtn, handleEventRemoveModalSubmit, handleEventSetGroupModalSubmit, handleEventMapModalSubmit, refreshEventEmbed } from '../events/interactions/eventInteractions.js';
 import { handleInterviewReadyBtn } from '../events/interactions/interviewReady.js';
 import { createActivityThreadIpc, handleActivityForumMessage, handleActivityUploadBtn, handleActivityModalSubmit, handleActivityReaction, rebuildActivityFromForum, closeActivityThread, isActivityExpired } from '../events/interactions/activityInteractions.js';
 import { checkAndDeployEmbeds } from '../lib/embedDeployer.js';
@@ -613,8 +613,6 @@ export async function loadEvents(client: Client) {
                     if (debugDm) console.log('📡 [DM] IPC bot-event failed');
                 }
                 
-                // Add a checkmark reaction to let user know it was received
-                await message.react('✅').catch(() => {});
             } else {
                 if (process.env.DEBUG_DM_MESSAGES === '1') {
                     console.log(`🧾 [DM] Заявка для discord=${message.author.id} не найдена (message=${(message.content ?? '').slice(0, 50)})`);
@@ -703,8 +701,6 @@ export async function loadEvents(client: Client) {
                 await handleEventMapModalSubmit(interaction).catch(console.error);
             } else if (interaction.customId.startsWith('event_remove_modal_')) {
                 await handleEventRemoveModalSubmit(interaction).catch(console.error);
-            } else if (interaction.customId.startsWith('event_setvoice_modal_')) {
-                await handleEventSetVoiceModalSubmit(interaction).catch(console.error);
             } else if (interaction.customId.startsWith('activity_modal_')) {
                 const rawData = activityModalRawCache.get(interaction.customId);
                 activityModalRawCache.delete(interaction.customId);

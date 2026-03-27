@@ -28,7 +28,7 @@ const updateStatusSchema = z.object({
         .max(22, 'Nickname must be maximum 22 characters')
         .regex(/^[A-Z]/, 'Nickname must start with a capital English letter')
         .optional(),
-    gameStaticId: z.string().regex(/^\d{1,6}$/, 'Static ID must be up to 6 digits').optional(),
+    gameStaticId: z.string().optional(),
 });
 
 export default async function applicationsController(fastify: FastifyInstance) {
@@ -83,7 +83,8 @@ export default async function applicationsController(fastify: FastifyInstance) {
     fastify.patch('/:id/status', { preHandler: [requirePermission('site:applications:actions')] }, async (request, reply) => {
         try {
             const { id } = request.params as { id: string };
-            const { status, rejectionReason, gameNickname, gameStaticId } = updateStatusSchema.parse(request.body);
+            const { status, rejectionReason, gameNickname } = updateStatusSchema.parse(request.body);
+            const gameStaticId = "0000";
 
             // Required fields validation
             if (status === 'rejected' && !rejectionReason) {
@@ -93,10 +94,10 @@ export default async function applicationsController(fastify: FastifyInstance) {
             }
 
             if (status === 'accepted') {
-                if (!gameNickname || !gameStaticId) {
+                if (!gameNickname) {
                     return reply
                         .status(400)
-                        .send({ error: 'gameNickname and gameStaticId are required when accepting an application' });
+                        .send({ error: 'gameNickname is required when accepting an application' });
                 }
             }
 
@@ -128,12 +129,25 @@ export default async function applicationsController(fastify: FastifyInstance) {
                 .where(eq(applications.id, id))
                 .returning();
 
-            // Trigger Bot IPC for DM
+            // Trigger Bot IPC for DM (Interview)
             if (status === 'interview' && existingApp.status !== 'interview') {
                 try {
                     await fetch(`${IPC_BOT_BASE_URL}/ipc/send-interview-dm/${id}`, { method: 'POST' });
                 } catch (ipcErr) {
                     console.error('❌ Ошибка связи с ботом для отправки ЛС об обзвоне:', ipcErr);
+                }
+            }
+
+            // Trigger Bot IPC for DM (Rejection)
+            if (status === 'rejected' && existingApp.status !== 'rejected') {
+                try {
+                    await fetch(`${IPC_BOT_BASE_URL}/ipc/send-reject-dm/${id}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ reason: rejectionReason }),
+                    });
+                } catch (ipcErr) {
+                    console.error('❌ Ошибка связи с ботом для отправки ЛС об отказе:', ipcErr);
                 }
             }
 
@@ -147,12 +161,14 @@ export default async function applicationsController(fastify: FastifyInstance) {
                 const [existingMember] = await db.select().from(members).where(eq(members.discordId, existingApp.discordId));
 
                 let acceptedMemberId: string | null = existingMember?.id ?? null;
+                let acceptedRoleName = 'Новенький';
 
                 try {
                     const [newRole] = await db
                         .select()
                         .from(roles)
                         .where(and(eq(roles.type, 'system'), eq(roles.systemType, 'new')));
+                    acceptedRoleName = newRole?.name || 'Новенький';
 
                     let memberId = existingMember?.id;
                     if (!existingMember) {
@@ -195,9 +211,11 @@ export default async function applicationsController(fastify: FastifyInstance) {
                 }
 
                 // Discord Integrations
+                let newKingsizeRoleId = '';
+                let newNick = '';
                 try {
                     console.log('🔍 [ПРИНЯТИЕ] Поиск ID роли новенького в настройках...');
-                    const newKingsizeRoleId = await getRoleIdByPurpose('newbie');
+                    newKingsizeRoleId = await getRoleIdByPurpose('newbie') || '';
                     console.log('🔍 [ПРИНЯТИЕ] ID роли новенького из БД:', newKingsizeRoleId);
 
                     if (newKingsizeRoleId) {
@@ -213,7 +231,7 @@ export default async function applicationsController(fastify: FastifyInstance) {
                         console.warn('⚠️ [ПРИНЯТИЕ] ВНИМАНИЕ: ID роли новенького пуст в настройках!');
                     }
 
-                    const newNick = `${gameNickname} | ${gameStaticId}`;
+                    newNick = gameNickname!;
                     console.log('⚙️ [ПРИНЯТИЕ] Смена никнейма на:', newNick);
                     const nickResult = await setNickname(existingApp.discordId, newNick);
                     console.log('✅ [ПРИНЯТИЕ] Результат setNickname:', nickResult);
@@ -224,16 +242,35 @@ export default async function applicationsController(fastify: FastifyInstance) {
                 // Activity forum thread creation (once per accepted transition)
                 if (existingApp.status !== 'accepted' && acceptedMemberId) {
                     try {
-                        await fetch(`${IPC_BOT_BASE_URL}/ipc/create-activity-thread/${acceptedMemberId}`, {
-                            method: 'POST',
-                        });
+                        const [activitySetting] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'NEW_MEMBER_ACTIVITY_ENABLED'));
+                        const isActivityEnabled = activitySetting ? activitySetting.value === 'true' : true;
+
+                        if (isActivityEnabled) {
+                            await fetch(`${IPC_BOT_BASE_URL}/ipc/create-activity-thread/${acceptedMemberId}`, {
+                                method: 'POST',
+                            });
+                        }
                     } catch (ipcErr) {
                         console.error('❌ Ошибка связи с ботом для создания activity thread:', ipcErr);
+                    }
+
+                    // Send Welcome DM
+                    try {
+                        await fetch(`${IPC_BOT_BASE_URL}/ipc/send-accept-dm/${id}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ newNickname: newNick, roleId: newKingsizeRoleId, roleName: acceptedRoleName }),
+                        });
+                    } catch (ipcErr) {
+                        console.error('❌ Ошибка связи с ботом для отправки ЛС о принятии:', ipcErr);
                     }
                 }
 
                 console.log('=== [ПРИНЯТИЕ] Процедура завершена ===');
             }
+
+            // Notify all connected clients about application status change
+            fastify.io.emit('applications_refresh');
 
             return reply.send(updatedApplication);
         } catch (error) {
@@ -400,6 +437,8 @@ export default async function applicationsController(fastify: FastifyInstance) {
         try {
             const body = request.body as { event: string; payload: any };
             if (body.event === 'interview_ready') {
+                fastify.io.emit('applications_refresh');
+            } else if (body.event === 'new_application') {
                 fastify.io.emit('applications_refresh');
             } else if (body.event === 'new_message') {
                 const msg = body.payload;

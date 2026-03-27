@@ -3,11 +3,11 @@ version: '3.8'
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: majestic_postgres
+    container_name: kingsize_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-majestic_family}
+      POSTGRES_DB: ${POSTGRES_DB:-kingsize_family}
     ports:
       - "5432:5432"
     volumes:
@@ -16,7 +16,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: majestic_redis
+    container_name: kingsize_redis
     ports:
       - "6379:6379"
     volumes:
@@ -33,7 +33,7 @@ services:
     environment:
       PORT: ${PORT:-3000}
       HOST: ${HOST:-0.0.0.0}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/majestic_family}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/kingsize_family}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
 
       # CORS + redirects
@@ -62,7 +62,7 @@ services:
       - postgres
       - redis
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/majestic_family}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/kingsize_family}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
 
       DISCORD_TOKEN: ${DISCORD_TOKEN}

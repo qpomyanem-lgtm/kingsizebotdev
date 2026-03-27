@@ -4,17 +4,18 @@ import { systemSettings } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { refreshAfkEmbed } from './afkEmbed';
 import { refreshServerOnlineEmbed } from './serverStatusEmbed';
-import { buildTicketsPanelComponents } from '../embeds/panels/ticketsPanel.js';
+import { buildTicketsPanelPayload } from '../embeds/panels/ticketsPanel.js';
 import { buildEventsPanelComponents } from '../embeds/panels/eventsPanel.js';
 import { buildOnlineStatusPanelComponents } from '../embeds/panels/onlineStatusPanel.js';
-import { buildAfkEndPanelComponents, buildAfkStartPanelComponents } from '../embeds/panels/afkPanels.js';
+import { buildActiveAfkRawPayload } from '../embeds/afk/activeAfkEmbedBuilder.js';
+import { buildAfkPanelPayload } from '../embeds/panels/afkPanels.js';
 
 let isDeployingEmbeds = false;
 
 interface EmbedConfig {
     channelKey: string;
     messageKey: string;
-    buildComponents: () => { components: any[], flags: number };
+    buildPayload: () => Promise<{ components: any[], flags?: number, embeds?: any[] }>;
     onCreated?: (client: Client) => Promise<void>;
 }
 
@@ -25,21 +26,23 @@ export async function checkAndDeployEmbeds(client: Client) {
         {
             channelKey: 'TICKETS_CHANNEL_ID',
             messageKey: 'TICKETS_MESSAGE_ID',
-            buildComponents: () => {
-                return buildTicketsPanelComponents();
+            buildPayload: async () => {
+                const [row] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'APPLICATIONS_OPEN'));
+                const applicationsOpen = row?.value === 'true';
+                return buildTicketsPanelPayload(applicationsOpen);
             }
         },
         {
             channelKey: 'EVENTS_CHANNEL_ID',
             messageKey: 'EVENTS_MESSAGE_ID',
-            buildComponents: () => {
+            buildPayload: async () => {
                 return buildEventsPanelComponents();
             }
         },
         {
             channelKey: 'ONLINE_CHANNEL_ID',
             messageKey: 'ONLINE_MESSAGE_ID',
-            buildComponents: () => {
+            buildPayload: async () => {
                 return buildOnlineStatusPanelComponents();
             },
             onCreated: async (c) => {
@@ -49,7 +52,7 @@ export async function checkAndDeployEmbeds(client: Client) {
         {
             channelKey: 'AFK_CHANNEL_ID',
             messageKey: 'AFK_MESSAGE_ID',
-            buildComponents: () => {
+            buildPayload: async () => {
                 // AFK needs 2 consecutive messages — handled as special case in deployEmbed
                 return { components: [], flags: MessageFlags.IsComponentsV2 };
             }
@@ -83,18 +86,17 @@ async function deployEmbed(client: Client, channelId: string, config: EmbedConfi
         let sentMessageId: string | null = null;
 
         if (config.channelKey === 'AFK_CHANNEL_ID') {
-            // AFK Special Case: 2 Messages
+            // AFK: list message first (tracked), then static image panel
+            const listPayload = buildActiveAfkRawPayload([]);
+            const msg = await (channel as TextChannel).send(listPayload as any);
+            sentMessageId = msg.id;
 
-            const panel1 = buildAfkStartPanelComponents();
-            await (channel as TextChannel).send(panel1);
-
-            const panel2 = buildAfkEndPanelComponents();
-            const msg2 = await (channel as TextChannel).send(panel2);
-            sentMessageId = msg2.id;
+            const imagePanelPayload = buildAfkPanelPayload();
+            await (channel as TextChannel).send(imagePanelPayload as any);
 
             await refreshAfkEmbed(client);
         } else {
-            const payload = config.buildComponents();
+            const payload = await config.buildPayload();
             const msg = await (channel as TextChannel).send(payload);
             sentMessageId = msg.id;
 

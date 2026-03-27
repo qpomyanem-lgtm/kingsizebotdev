@@ -28,8 +28,11 @@ ENV NODE_ENV=production
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
+COPY --from=build /app/src ./src
+COPY --from=build /app/drizzle.config.ts ./
+COPY --from=build /app/tsconfig.json ./
 
 EXPOSE 3000
 
-CMD ["node", "dist/backend/server.js"]
+CMD ["sh", "-c", "echo 'Waiting for PostgreSQL...' && for i in 1 2 3 4 5 6 7 8 9 10; do npx drizzle-kit push && break || (echo \"Attempt $i failed, retrying in 3s...\" && sleep 3); done && node dist/backend/server.js"]
 

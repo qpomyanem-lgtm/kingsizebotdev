@@ -1,12 +1,11 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ThemeProvider } from './context/ThemeContext';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { Login } from './pages/Login';
 import { Applications } from './pages/Applications';
 import { Members } from './pages/Members';
 import { Afk } from './pages/Afk';
-import { Mcl } from './pages/Mcl';
-import { MclMaps } from './pages/MclMaps';
 import { Captures } from './pages/Captures';
 import { Kicked } from './pages/Kicked';
 import { Archive } from './pages/Archive';
@@ -23,16 +22,22 @@ import { useAuth } from './lib/api';
 
 import type { ReactNode } from 'react';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60 * 1000, 
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
 
 const DEFAULT_ROUTE_BY_PERMISSION: Array<{ permission: string; path: string }> = [
   { permission: 'site:applications:view', path: '/applications' },
   { permission: 'site:activity:view', path: '/activity' },
   { permission: 'site:members:view', path: '/members' },
-  { permission: 'site:afk:view', path: '/afk' },
-  { permission: 'site:mcl:view', path: '/mcl' },
   { permission: 'site:captures:view', path: '/captures' },
-  { permission: 'site:mcl_maps:view', path: '/mcl-maps' },
+  { permission: 'site:afk:view', path: '/afk' },
   { permission: 'site:archive:view', path: '/archive' },
   { permission: 'site:kicked:view', path: '/kicked' },
   { permission: 'site:logs:view', path: '/logs' },
@@ -109,11 +114,13 @@ export default function App() {
   if (!isAdminHost) {
     return (
       <QueryClientProvider client={queryClient}>
-        <Router>
-          <Routes>
-            <Route path="*" element={<PublicLanding />} />
-          </Routes>
-        </Router>
+        <ThemeProvider>
+          <Router>
+            <Routes>
+              <Route path="*" element={<PublicLanding />} />
+            </Routes>
+          </Router>
+        </ThemeProvider>
       </QueryClientProvider>
     );
   }
@@ -121,8 +128,9 @@ export default function App() {
   // Admin host: full admin panel with login
   return (
     <QueryClientProvider client={queryClient}>
-      <Router>
-        <Routes>
+      <ThemeProvider>
+        <Router>
+          <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={
             <RequireAuth>
@@ -132,10 +140,8 @@ export default function App() {
             <Route index element={<DefaultDashboardRoute />} />
             <Route path="applications" element={<Applications />} />
             <Route path="members" element={<Members />} />
-            <Route path="afk" element={<Afk />} />
-            <Route path="mcl" element={<Mcl />} />
-            <Route path="mcl-maps" element={<MclMaps />} />
             <Route path="captures" element={<Captures />} />
+            <Route path="afk" element={<Afk />} />
             <Route path="activity" element={<Activity />} />
             <Route path="kicked" element={<Kicked />} />
             <Route path="archive" element={<Archive />} />
@@ -148,7 +154,8 @@ export default function App() {
             <Route path="settings/access" element={<AccessSettings />} />
           </Route>
         </Routes>
-      </Router>
+        </Router>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

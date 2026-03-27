@@ -5,16 +5,17 @@ import { v4 as uuidv4 } from 'uuid';
 import { eq } from 'drizzle-orm';
 
 export async function handleTicketApplyModal(interaction: ModalSubmitInteraction) {
-    // Acknowledge immediately to avoid interaction token expiry.
-    await interaction.deferReply({ ephemeral: true }).catch(() => {});
+    // Acknowledge immediately without creating an ephemeral message.
+    await interaction.deferUpdate().catch(() => {});
     const discordId = interaction.user.id;
 
     // Check if user is blacklisted
     try {
         const [member] = await db.select().from(members).where(eq(members.discordId, discordId));
         if (member && member.status === 'blacklisted') {
-            await interaction.editReply({
+            await interaction.followUp({
                 content: '❌ Вы находитесь в черном списке и не можете подавать заявки.',
+                ephemeral: true,
             });
             return;
         }
@@ -47,24 +48,43 @@ export async function handleTicketApplyModal(interaction: ModalSubmitInteraction
 
         let dmStatusMsg = 'Проверьте личные сообщения.';
         try {
-            const embed = new EmbedBuilder()
-                .setTitle('📩 Заявка отправлена')
-                .setDescription('Ваша заявка успешно отправлена и ожидает рассмотрения администрацией. Мы свяжемся с вами в ближайшее время!')
-                .setColor(Colors.Green);
+            // Raw V2 container components payload
+            const rawPayload = {
+                flags: 32768,
+                allowed_mentions: { parse: [] },
+                components: [
+                    {
+                        type: 17, // Section
+                        components: [
+                            {
+                                type: 10, // Text
+                                content: '### <:newapp:1486747271641956514> **Заявка отправлена**\n\n***Ваша заявка успешно отправлена и ожидает рассмотрения. Мы свяжемся с вами в ближайшее время!***'
+                            }
+                        ]
+                    }
+                ]
+            };
             
-            await interaction.user.send({ embeds: [embed] });
+            await (interaction.user as any).send(rawPayload);
         } catch (dmError) {
             console.error('❌ Ошибка при отправке ЛС:', dmError);
             dmStatusMsg = '(Не удалось отправить уведомление в ЛС, возможно они у вас закрыты)';
         }
 
-        await interaction.editReply({
-            content: `Ваша заявка успешно отправлена! ${dmStatusMsg}`,
-        });
+        // Success: notify backend to refresh applications on dashboard
+        try {
+            const IPC_BACKEND_BASE_URL = process.env.IPC_BACKEND_BASE_URL || 'http://localhost:3000';
+            await fetch(`${IPC_BACKEND_BASE_URL}/api/applications/ipc/bot-event`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ event: 'new_application', payload: {} }),
+            });
+        } catch { /* ignore IPC errors */ }
     } catch (error) {
         console.error('❌ Ошибка при сохранении заявки:', error);
-        await interaction.editReply({
+        await interaction.followUp({
             content: 'Произошла ошибка при сохранении заявки. Пожалуйста, сообщите администрации.',
+            ephemeral: true,
         });
     }
 }

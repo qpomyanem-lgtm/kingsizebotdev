@@ -1,8 +1,8 @@
-import { Client, TextChannel, MessageFlags } from 'discord.js';
+import { Client, TextChannel } from 'discord.js';
 import { db } from '../../db';
 import { afkEntries, systemSettings } from '../../db/schema';
 import { eq, desc, inArray, and, lte } from 'drizzle-orm';
-import { buildActiveAfksDescription, buildActiveAfkContainer } from '../embeds/afk/activeAfkEmbedBuilder';
+import { buildActiveAfkRawPayload } from '../embeds/afk/activeAfkEmbedBuilder.js';
 
 export async function refreshAfkEmbed(client: Client) {
     try {
@@ -22,17 +22,11 @@ export async function refreshAfkEmbed(client: Client) {
             .where(eq(afkEntries.status, 'active'))
             .orderBy(desc(afkEntries.startsAt));
 
-        const description = buildActiveAfksDescription(
+        const payload = buildActiveAfkRawPayload(
             activeAfks.map((a) => ({ discordId: a.discordId, endsAt: a.endsAt, reason: a.reason })),
         );
 
-        const container = buildActiveAfkContainer(description);
-
-        await message.edit({
-            embeds: [],
-            components: [container],
-            flags: MessageFlags.IsComponentsV2
-        });
+        await message.edit(payload as any);
     } catch (e) {
         console.error('❌ Ошибка обновления сообщения списка AFK:', e);
     }
@@ -64,4 +58,3 @@ export async function checkExpiredAfks(client: Client) {
         console.error('❌ Ошибка проверки истекших AFK:', e);
     }
 }
-

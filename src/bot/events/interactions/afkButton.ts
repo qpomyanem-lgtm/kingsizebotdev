@@ -4,10 +4,12 @@ import { afkEntries } from '../../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { refreshAfkEmbed } from '../../lib/afkEmbed';
 import { showModalViaInteractionCallback } from '../../lib/interactionResponses';
-import { hasPermission } from '../../../backend/lib/discordRoles';
+import { hasPermission, hasSystemRole } from '../../../backend/lib/discordRoles';
 
 export async function handleAfkStartBtn(interaction: ButtonInteraction) {
-    const allowed = await hasPermission(interaction.user.id, 'bot:afk:start');
+    const allowed = await hasPermission(interaction.user.id, 'bot:afk:start') ||
+                    await hasSystemRole(interaction.user.id, 'main') ||
+                    await hasSystemRole(interaction.user.id, 'new');
     if (!allowed) {
         return interaction.reply({ content: 'У вас нет доступа к системе АФК.', ephemeral: true });
     }
@@ -70,6 +72,6 @@ export async function handleAfkEndBtn(interaction: ButtonInteraction) {
         endedAt: new Date()
     }).where(eq(afkEntries.id, existing[0].id));
 
-    await interaction.reply({ content: '✅ Ваш АФК успешно завершён.', ephemeral: true });
+    await interaction.deferUpdate().catch(() => {});
     await refreshAfkEmbed(interaction.client);
 }

@@ -1,7 +1,7 @@
 import { ButtonInteraction, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 import { db } from '../../../db';
 import { systemSettings } from '../../../db/schema';
-import { inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { showModalViaInteractionCallback } from '../../lib/interactionResponses';
 
 interface FieldConfig {
@@ -66,6 +66,16 @@ async function getFieldConfigs(): Promise<FieldConfig[]> {
 }
 
 export async function handleTicketApplyBtn(interaction: ButtonInteraction) {
+    // Check if applications are open
+    try {
+        const [appOpenRow] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'APPLICATIONS_OPEN'));
+        if (appOpenRow?.value !== 'true') {
+            return interaction.reply({ content: '❌ Заявки сейчас закрыты.', ephemeral: true });
+        }
+    } catch {
+        // If DB check fails, allow through as fallback
+    }
+
     const now = Date.now();
     const cached = cachedFieldConfigs && cachedFieldConfigs.expiresAt > now ? cachedFieldConfigs.value : null;
     const configs = cached ?? DEFAULT_FIELD_CONFIGS;

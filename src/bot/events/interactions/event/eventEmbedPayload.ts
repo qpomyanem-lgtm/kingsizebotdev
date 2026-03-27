@@ -57,7 +57,7 @@ export async function getEventEmbedPayload(eventId: string): Promise<any | null>
     if (mainList.length > 0) {
         mainListText += mainList.map(formatParticipant).join('\n');
     } else {
-        mainListText += '-# Список пуст';
+        mainListText += '-# Основной список пуст';
     }
 
     // Build reserve text
@@ -65,7 +65,7 @@ export async function getEventEmbedPayload(eventId: string): Promise<any | null>
     if (reserveList.length > 0) {
         reserveText += reserveList.map(formatParticipant).join('\n');
     } else {
-        reserveText += '-# Нет участников в резерве';
+        reserveText += '-# Резервный список пуст';
     }
 
     // Event time as Unix timestamp
@@ -94,13 +94,8 @@ export async function getEventEmbedPayload(eventId: string): Promise<any | null>
         infoText += `\n**◆ Голосовой канал:** <#${event.voiceChannelId}>`;
     }
 
-    // Title with custom emoji for MCL
-    const titleMap: Record<string, string> = {
-        MCL: '<:mcl:1485301422688829582> Список на MCL / ВЗЗ',
-        'ВЗЗ': 'Список на MCL / ВЗЗ',
-        Capt: '<:cpt:1485302217048326145> Список на капт',
-    };
-    const title = titleMap[event.eventType] ?? event.eventType;
+    // Title with custom emoji for Capt
+    const title = `<:swords:1486775719811088455> Список #${event.id.slice(0, 4)}`;
 
     // Build container
     const container = new ContainerBuilder()
@@ -113,69 +108,7 @@ export async function getEventEmbedPayload(eventId: string): Promise<any | null>
         .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
         .addTextDisplayComponents(new TextDisplayBuilder().setContent(infoText));
 
-    // Map image (MCL/ВЗЗ only)
-    if (event.mapId && (event.eventType === 'MCL' || event.eventType === 'ВЗЗ')) {
-        const [map] = await db.select().from(eventMaps).where(eq(eventMaps.id, event.mapId));
-        if (map) {
-            // MediaGallery raw component (type 12) — discord.js has no builder for addMediaGallery on Container
-            // We'll add it via the raw data approach
-            const containerData = container.toJSON();
-            (containerData as any).components.push({
-                type: 12, // MediaGallery
-                items: [
-                    {
-                        media: { url: map.imageUrl },
-                        description: `Карта: ${map.name}`,
-                    },
-                ],
-            } as any);
 
-            // Rebuild from raw
-            const rawContainer = containerData as any;
-
-            // Buttons — Closed: all disabled; InProgress: join/leave disabled, manage active; Open: all active
-            const joinLeaveDisabled = !canJoinLeave;
-            rawContainer.components.push({
-                type: 1,
-                components: [
-                    {
-                        type: 2,
-                        style: joinLeaveDisabled ? 2 : 1,
-                        label: 'Присоединиться',
-                        emoji: { id: '1485303136049430719', name: 'plus' },
-                        custom_id: `event_join_${eventId}`,
-                        disabled: joinLeaveDisabled,
-                    },
-                    {
-                        type: 2,
-                        style: 2,
-                        label: 'Покинуть',
-                        custom_id: `event_leave_${eventId}`,
-                        disabled: joinLeaveDisabled,
-                    },
-                    {
-                        type: 2,
-                        style: isClosed ? 2 : 3,
-                        label: 'Управление',
-                        custom_id: `event_manage_${eventId}`,
-                        disabled: isClosed,
-                    },
-                ],
-            });
-
-            // Footer
-            rawContainer.components.push({
-                type: 10, // TextDisplay
-                content: `-# Список #${event.id.slice(0, 4)}  ✦  Обновлено <t:${nowUnix}:f>`,
-            });
-
-            return {
-                embeds: [],
-                components: [rawContainer as any],
-                flags: MessageFlags.IsComponentsV2,
-            };
-        }
-    }
 
     // No map — use builders
     const joinLeaveOff = !canJoinLeave;
@@ -183,25 +116,27 @@ export async function getEventEmbedPayload(eventId: string): Promise<any | null>
         new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
                 .setCustomId(`event_join_${eventId}`)
-                .setLabel('Присоединиться')
-                .setEmoji({ id: '1485303136049430719', name: 'plus' })
-                .setStyle(joinLeaveOff ? ButtonStyle.Secondary : ButtonStyle.Primary)
+                .setLabel('ПРИСОЕДИНИТЬСЯ')
+                .setEmoji({ id: '1486862619091537950', name: 'plus' })
+                .setStyle(ButtonStyle.Secondary)
                 .setDisabled(joinLeaveOff),
             new ButtonBuilder()
                 .setCustomId(`event_leave_${eventId}`)
-                .setLabel('Покинуть')
+                .setLabel('ПОКИНУТЬ')
+                .setEmoji({ id: '1486862629673898107', name: 'minus' })
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(joinLeaveOff),
             new ButtonBuilder()
                 .setCustomId(`event_manage_${eventId}`)
-                .setLabel('Управление')
-                .setStyle(isClosed ? ButtonStyle.Secondary : ButtonStyle.Success)
+                .setLabel('УПРАВЛЕНИЕ')
+                .setEmoji({ id: '1486862826428432415', name: 'settings' })
+                .setStyle(ButtonStyle.Secondary)
                 .setDisabled(isClosed),
         ),
     );
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`-# Список #${event.id.slice(0, 4)}  ✦  Обновлено <t:${nowUnix}:f>`),
+        new TextDisplayBuilder().setContent(`-# Обновлено <t:${nowUnix}:f>`),
     );
 
     return { embeds: [], components: [container], flags: MessageFlags.IsComponentsV2 };

@@ -25,22 +25,22 @@ export async function handleEventCreateBtn(interaction: ButtonInteraction) {
         return;
     }
 
-    // Single modal with RadioGroup + TextInputs (raw API for RadioGroup support)
+    // Modal with two TextInputs
     const rawModal = {
-        title: 'Создание списка',
+        title: 'Создание списка на Капт',
         custom_id: 'event_create_modal',
         components: [
             {
-                type: 18, // Label
-                label: 'Выберите тип списка:',
-                component: {
-                    type: 21, // RadioGroup
-                    custom_id: 'event_type_radio',
-                    options: [
-                        { value: 'MCL', label: 'Создать список на MCL / ВЗЗ' },
-                        { value: 'Capt', label: 'Создать список на капт' },
-                    ],
-                },
+                type: 1,
+                components: [
+                    {
+                        type: 4,
+                        custom_id: 'slotsInput',
+                        label: 'Количество слотов:',
+                        style: 1,
+                        required: true,
+                    },
+                ],
             },
             {
                 type: 1, // ActionRow
@@ -50,18 +50,6 @@ export async function handleEventCreateBtn(interaction: ButtonInteraction) {
                         custom_id: 'timeInput',
                         label: 'Время проведения(МСК):',
                         style: 1, // Short
-                        required: true,
-                    },
-                ],
-            },
-            {
-                type: 1,
-                components: [
-                    {
-                        type: 4,
-                        custom_id: 'slotsInput',
-                        label: 'Количество слотов:',
-                        style: 1,
                         required: true,
                     },
                 ],
@@ -76,27 +64,17 @@ export async function handleEventCreateBtn(interaction: ButtonInteraction) {
 // ── 2. Create Modal Submit → Insert Event ────────────────────────
 
 export async function handleEventCreateModalSubmit(interaction: ModalSubmitInteraction) {
-    // Acknowledge immediately to avoid interaction token expiry.
-    await interaction.deferReply({ ephemeral: true }).catch(() => {});
+    // Acknowledge immediately to gracefully close the modal silently.
+    await interaction.deferUpdate().catch(() => {});
 
-    // Extract radio value for event type from raw components
-    const rawComponents = (interaction as any).components ?? [];
-    type EventType = 'Capt' | 'MCL' | 'ВЗЗ';
-    let eventType: EventType = 'MCL'; // fallback
-    for (const comp of rawComponents) {
-        const inner = comp.components?.[0] ?? comp.component;
-        if (inner?.customId === 'event_type_radio' || inner?.custom_id === 'event_type_radio') {
-            eventType = (inner.value ?? 'MCL') as EventType;
-            break;
-        }
-    }
+    const eventType = 'Capt';
 
     const time = interaction.fields.getTextInputValue('timeInput');
     const slotsStr = interaction.fields.getTextInputValue('slotsInput');
 
     const slots = parseInt(slotsStr, 10);
     if (isNaN(slots) || slots <= 0) {
-        await interaction.editReply({ content: 'Количество слотов должно быть положительным числом.' });
+        await interaction.followUp({ content: 'Количество слотов должно быть положительным числом.', ephemeral: true });
         return;
     }
 
@@ -130,8 +108,8 @@ export async function handleEventCreateModalSubmit(interaction: ModalSubmitInter
     const isoMoscow = `${year}-${pad(month)}-${pad(day)}T${pad(hours)}:${pad(minutes)}:00+03:00`;
     const utcDate = new Date(isoMoscow);
 
-    // Determine target channel from system settings based on event type
-    const channelSettingKey = eventType === 'Capt' ? 'EVENT_CAPT_CHANNEL_ID' : 'EVENT_MCL_CHANNEL_ID';
+    // Determine target channel from system settings
+    const channelSettingKey = 'EVENT_CAPT_CHANNEL_ID';
     const [channelSetting] = await db
         .select()
         .from(systemSettings)
@@ -139,8 +117,9 @@ export async function handleEventCreateModalSubmit(interaction: ModalSubmitInter
 
     const targetChannelId = channelSetting?.value;
     if (!targetChannelId) {
-        await interaction.editReply({
+        await interaction.followUp({
             content: `Канал для ${EVENT_TYPE_LABELS[eventType] ?? eventType} не настроен. Попросите администратора указать канал в настройках.`,
+            ephemeral: true
         });
         return;
     }
@@ -150,12 +129,12 @@ export async function handleEventCreateModalSubmit(interaction: ModalSubmitInter
     try {
         const fetched = await client.channels.fetch(targetChannelId);
         if (!fetched || !fetched.isTextBased() || !('send' in fetched)) {
-            await interaction.editReply({ content: 'Настроенный канал недоступен или не является текстовым.' });
+            await interaction.followUp({ content: 'Настроенный канал недоступен или не является текстовым.', ephemeral: true });
             return;
         }
         targetChannel = fetched as TextBasedChannel;
     } catch {
-        await interaction.editReply({ content: 'Не удалось получить настроенный канал. Проверьте ID в настройках.' });
+        await interaction.followUp({ content: 'Не удалось получить настроенный канал. Проверьте ID в настройках.', ephemeral: true });
         return;
     }
 
@@ -168,6 +147,17 @@ export async function handleEventCreateModalSubmit(interaction: ModalSubmitInter
     });
 
     const eventId = uuidv4();
+
+    // Create a thread for logs on the event message
+    try {
+        await msg.startThread({
+            name: `Список #${eventId.slice(0, 4)}`,
+            autoArchiveDuration: 1440,
+        });
+    } catch (e) {
+        console.error('❌ Не удалось создать ветку для логов:', e);
+    }
+
     await db.insert(events).values({
         id: eventId,
         messageId: msg.id,
@@ -180,8 +170,5 @@ export async function handleEventCreateModalSubmit(interaction: ModalSubmitInter
     });
 
     await refreshEventEmbed(msg as any, eventId);
-    await interaction.editReply({
-        content: `Список на ${EVENT_TYPE_LABELS[eventType] ?? eventType} успешно создан!`,
-    });
 }
 

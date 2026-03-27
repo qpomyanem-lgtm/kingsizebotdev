@@ -20,7 +20,7 @@ async function ensureActivityThreadAndSendDm(client: Client, memberId: string, a
 
     const [existing] = await db.select().from(activityThreads).where(eq(activityThreads.memberId, memberId)).limit(1);
 
-    const threadName = `Активность: ${member.gameNickname} #${member.gameStaticId}`;
+    const threadName = `Активность: ${member.gameNickname}`;
 
     // If a completed thread already exists, remove its screenshots then the thread so a fresh one is created
     if (existing && existing.status === 'completed') {

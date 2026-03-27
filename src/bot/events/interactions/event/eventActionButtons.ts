@@ -70,52 +70,30 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
         const buttons: ButtonBuilder[] = [
             new ButtonBuilder()
                 .setCustomId(`event_close_${eventId}`)
-                .setLabel('Закрыть список')
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji('🔒'),
+                .setLabel('ЗАКРЫТЬ СПИСОК')
+                .setStyle(ButtonStyle.Secondary)
+                .setEmoji({ id: '1486874746120568852', name: 'lock' }),
             new ButtonBuilder()
                 .setCustomId(`event_removepick_${eventId}`)
-                .setLabel('Удалить из списка')
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji('❌'),
+                .setLabel('УДАЛИТЬ ИЗ СПИСКА')
+                .setStyle(ButtonStyle.Secondary)
+                .setEmoji({ id: '1486758295510323260', name: 'reject' }),
             new ButtonBuilder()
                 .setCustomId(`event_setgroup_${eventId}`)
-                .setLabel('Указать группу')
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji('📝'),
-            new ButtonBuilder()
-                .setCustomId(`event_setvoice_${eventId}`)
-                .setLabel('Голосовой канал')
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji('🔊'),
+                .setLabel('УКАЗАТЬ ГРУППУ')
+                .setStyle(ButtonStyle.Secondary)
+                .setEmoji({ id: '1486875254981656698', name: 'pencil' }),
         ];
-
-        // Map selection only for MCL/ВЗЗ
-        if (event.eventType === 'MCL' || event.eventType === 'ВЗЗ') {
-            buttons.push(
-                new ButtonBuilder()
-                    .setCustomId(`event_selectmap_${eventId}`)
-                    .setLabel('Выбрать карту')
-                    .setStyle(ButtonStyle.Primary)
-                    .setEmoji('🗺️'),
-            );
-        }
 
         const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons.slice(0, 5));
         const rows: ActionRowBuilder<ButtonBuilder>[] = [row1];
 
-        // Second row for logs + mention
         const row2Buttons: ButtonBuilder[] = [
             new ButtonBuilder()
-                .setCustomId(`event_logs_${eventId}`)
-                .setLabel('Логи')
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji('📋'),
-            new ButtonBuilder()
                 .setCustomId(`event_mention_${eventId}`)
-                .setLabel('Упомянуть')
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji('📢'),
+                .setLabel('УВЕДОМЛЕНИЕ')
+                .setStyle(ButtonStyle.Secondary)
+                .setEmoji({ id: '1486876121344774174', name: 'bell' }),
         ];
         rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...row2Buttons));
 
@@ -165,82 +143,6 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
         return;
     }
 
-    // ── setvoice ──
-    if (action === 'setvoice') {
-        const canManage = interaction.user.id === event.creatorId;
-        if (!canManage) {
-            await sendEphemeral({ content: 'У вас нет прав.', ephemeral: true });
-            return;
-        }
-        if (event.status === 'Closed') {
-            await sendEphemeral({ content: 'Список уже закрыт.', ephemeral: true });
-            return;
-        }
-
-        const voiceSettings = await db
-            .select()
-            .from(systemSettings)
-            .where(
-                eq(systemSettings.key, 'EVENT_MCL_VOICE_CHANNEL_ID'),
-            );
-        const voiceSettings2 = await db
-            .select()
-            .from(systemSettings)
-            .where(
-                eq(systemSettings.key, 'EVENT_CAPT_VOICE_CHANNEL_ID'),
-            );
-
-        const mclVoice = voiceSettings[0]?.value;
-        const captVoice = voiceSettings2[0]?.value;
-
-        const options: { value: string; label: string }[] = [];
-        if (mclVoice) options.push({ value: mclVoice, label: 'Голосовой канал MCL / ВЗЗ' });
-        if (captVoice) options.push({ value: captVoice, label: 'Голосовой канал Капт' });
-
-        if (options.length === 0) {
-            await sendEphemeral({ content: 'Голосовые каналы не настроены в настройках.', ephemeral: true });
-            return;
-        }
-
-        // Need at least 2 options for RadioGroup
-        if (options.length === 1) {
-            // Auto-set the only available channel
-            await db.update(events).set({ voiceChannelId: options[0].value }).where(eq(events.id, eventId));
-            if (event.messageId && event.channelId) {
-                try {
-                    const channel = await interaction.client.channels.fetch(event.channelId);
-                    if (channel && channel.isTextBased() && 'messages' in channel) {
-                        const msg = await channel.messages.fetch(event.messageId);
-                        await refreshEventEmbed(msg as any, eventId);
-                    }
-                } catch (e) {
-                    console.error('❌ Ошибка обновления ембеда после setvoice:', e);
-                }
-            }
-            await sendEphemeral({ content: `Голосовой канал установлен: <#${options[0].value}>`, ephemeral: true });
-            return;
-        }
-
-        const rawModal = {
-            title: 'Голосовой канал',
-            custom_id: `event_setvoice_modal_${eventId}`,
-            components: [
-                {
-                    type: 18, // Label
-                    label: 'Выберите голосовой канал',
-                    component: {
-                        type: 21, // RadioGroup
-                        custom_id: 'voice_radio',
-                        options,
-                    },
-                },
-            ],
-        };
-
-        // @ts-ignore — raw API
-        await showModalViaInteractionCallback(interaction, rawModal as any);
-        return;
-    }
 
     // ── logs ──
     if (action === 'logs') {
@@ -300,8 +202,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
         }
 
         const eventTimeUnix = toUnixTs(event.eventTime);
-        const voiceText = event.voiceChannelId ? `\n🔊 Голосовой канал: <#${event.voiceChannelId}>` : '';
-        const dmText = `📢 **Напоминание о списке!**\n⏰ Время: <t:${eventTimeUnix}:F> (<t:${eventTimeUnix}:R>)${voiceText}`;
+        const dmText = `📢 **Напоминание о списке!**\n⏰ Время: <t:${eventTimeUnix}:F> (<t:${eventTimeUnix}:R>)`;
 
         // Send DM to each participant
         let sent = 0;
@@ -316,57 +217,14 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
             }
         }
 
-        const resultText = `Уведомления отправлены: ${sent} из ${participants.length}` + (failed > 0 ? ` (не доставлено: ${failed})` : '');
-        await sendEphemeral({ content: resultText, ephemeral: true });
+        // Just acknowledge silently
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.deferUpdate().catch(() => {});
+        }
         return;
     }
 
-    // ── selectmap ──
-    if (action === 'selectmap') {
-        const canManage = interaction.user.id === event.creatorId;
 
-        if (!canManage) {
-            await sendEphemeral({ content: 'У вас нет прав.', ephemeral: true });
-            return;
-        }
-
-        const maps = await db.select().from(eventMaps).orderBy(asc(eventMaps.name));
-        if (maps.length === 0) {
-            await sendEphemeral({
-                content: 'Нет доступных карт. Добавьте карты через панель управления.',
-                ephemeral: true,
-            });
-            return;
-        }
-
-        // Discord API requires RadioGroup to have 2 to 10 options precisely
-        const mapOptions = maps.slice(0, 10).map((m) => ({
-            value: m.id,
-            label: m.name,
-        }));
-
-        // Build raw modal with RadioGroup for map selection
-        const rawModal = {
-            title: 'Выбрать карту',
-            custom_id: `event_map_modal_${eventId}`,
-            components: [
-                {
-                    type: 18, // Label
-                    label: 'Карта',
-                    description: 'Выберите карту для мероприятия',
-                    component: {
-                        type: 21, // RadioGroup
-                        custom_id: 'map_radio',
-                        options: mapOptions,
-                    },
-                },
-            ],
-        };
-
-        // @ts-ignore — raw API
-        await showModalViaInteractionCallback(interaction, rawModal as any);
-        return;
-    }
 
     // ── setgroup ──
     if (action === 'setgroup') {
@@ -447,8 +305,22 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
 
         await db.insert(eventParticipants).values({ id: uuidv4(), eventId, userId: interaction.user.id, tierRoleId });
         await db.insert(eventLogs).values({ id: uuidv4(), eventId, userId: interaction.user.id, action: 'join' });
+        
+        // Log to thread
+        if (event.channelId && event.messageId) {
+            try {
+                const thread = await interaction.client.channels.fetch(event.messageId).catch(() => null);
+                if (thread && thread.isThread()) {
+                    const ts = Math.floor(Date.now() / 1000);
+                    await thread.send({ 
+                        content: `<:plus:1486862619091537950> <@${interaction.user.id}> присоединился к списку <t:${ts}:T>`,
+                        allowedMentions: { parse: [] }
+                    });
+                }
+            } catch (e) {}
+        }
+        
         await refreshEventEmbed(interaction.message, eventId);
-        await sendEphemeral({ content: 'Вы успешно присоединились к списку!', ephemeral: true });
     }
 
     if (action === 'leave') {
@@ -476,26 +348,41 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
                 ),
             );
         await db.insert(eventLogs).values({ id: uuidv4(), eventId, userId: interaction.user.id, action: 'leave' });
+
+        // Log to thread
+        if (event.channelId && event.messageId) {
+            try {
+                const thread = await interaction.client.channels.fetch(event.messageId).catch(() => null);
+                if (thread && thread.isThread()) {
+                    const ts = Math.floor(Date.now() / 1000);
+                    await thread.send({ 
+                        content: `<:minus:1486862629673898107> <@${interaction.user.id}> покинул список <t:${ts}:T>`,
+                        allowedMentions: { parse: [] }
+                    });
+                }
+            } catch (e) {}
+        }
+
         await refreshEventEmbed(interaction.message, eventId);
-        await sendEphemeral({ content: 'Вы покинули список.', ephemeral: true });
     }
 }
 
 // ── ModalSubmit: Remove participant via UserSelect ──────────────────
 
 export async function handleEventRemoveModalSubmit(interaction: ModalSubmitInteraction) {
-    await interaction.deferReply({ ephemeral: true }).catch(() => {});
+    // Acknowledge silently
+    await interaction.deferUpdate().catch(() => {});
 
     const eventId = interaction.customId.replace('event_remove_modal_', '');
 
     const [event] = await db.select().from(events).where(eq(events.id, eventId));
     if (!event) {
-        await interaction.editReply({ content: 'Событие не найдено.' });
+        await interaction.followUp({ content: 'Событие не найдено.', ephemeral: true });
         return;
     }
 
     if (interaction.user.id !== event.creatorId) {
-        await interaction.editReply({ content: 'У вас нет прав для управления этим списком.' });
+        await interaction.followUp({ content: 'У вас нет прав для управления этим списком.', ephemeral: true });
         return;
     }
 
@@ -514,7 +401,7 @@ export async function handleEventRemoveModalSubmit(interaction: ModalSubmitInter
     }
 
     if (!selectedUserId) {
-        await interaction.editReply({ content: 'Вы не выбрали участника.' });
+        await interaction.followUp({ content: 'Вы не выбрали участника.', ephemeral: true });
         return;
     }
 
@@ -525,7 +412,7 @@ export async function handleEventRemoveModalSubmit(interaction: ModalSubmitInter
         .where(and(eq(eventParticipants.eventId, eventId), eq(eventParticipants.userId, selectedUserId)));
 
     if (!participant) {
-        await interaction.editReply({ content: `<@${selectedUserId}> не находится в этом списке.` });
+        await interaction.followUp({ content: `<@${selectedUserId}> не находится в этом списке.`, ephemeral: true });
         return;
     }
 
@@ -547,58 +434,20 @@ export async function handleEventRemoveModalSubmit(interaction: ModalSubmitInter
     // Log removal
     await db.insert(eventLogs).values({ id: uuidv4(), eventId, userId: selectedUserId, action: 'removed' });
 
-    await interaction.editReply({ content: `Участник <@${selectedUserId}> удалён из списка.` });
-}
-
-// ── ModalSubmit: Set voice channel via RadioGroup ──────────────────
-
-export async function handleEventSetVoiceModalSubmit(interaction: ModalSubmitInteraction) {
-    await interaction.deferReply({ ephemeral: true }).catch(() => {});
-
-    const eventId = interaction.customId.replace('event_setvoice_modal_', '');
-
-    const [event] = await db.select().from(events).where(eq(events.id, eventId));
-    if (!event) {
-        await interaction.editReply({ content: 'Событие не найдено.' });
-        return;
-    }
-
-    if (interaction.user.id !== event.creatorId) {
-        await interaction.editReply({ content: 'У вас нет прав.' });
-        return;
-    }
-
-    // Extract selected voice channel from raw components (RadioGroup — uses .value, not .values)
-    const rawComponents = (interaction as any).components ?? [];
-    let selectedChannelId: string | null = null;
-    for (const comp of rawComponents) {
-        const inner = comp.components?.[0] ?? comp.component;
-        if (inner?.customId === 'voice_radio' || inner?.custom_id === 'voice_radio') {
-            selectedChannelId = inner.value ?? null;
-            break;
-        }
-    }
-
-    if (!selectedChannelId) {
-        await interaction.editReply({ content: 'Вы не выбрали канал.' });
-        return;
-    }
-
-    await db.update(events).set({ voiceChannelId: selectedChannelId }).where(eq(events.id, eventId));
-
-    // Refresh the original event embed
-    if (event.messageId && event.channelId) {
+    // Log to thread
+    if (event.channelId && event.messageId) {
         try {
-            const channel = await interaction.client.channels.fetch(event.channelId);
-            if (channel && channel.isTextBased() && 'messages' in channel) {
-                const msg = await channel.messages.fetch(event.messageId);
-                await refreshEventEmbed(msg as any, eventId);
+            const thread = await interaction.client.channels.fetch(event.messageId).catch(() => null);
+            if (thread && thread.isThread()) {
+                const ts = Math.floor(Date.now() / 1000);
+                await thread.send({ 
+                    content: `<:reject:1486758295510323260> <@${selectedUserId}> удалён из списка модератором <@${interaction.user.id}> <t:${ts}:T>`,
+                    allowedMentions: { parse: [] }
+                });
             }
-        } catch (e) {
-            console.error('❌ Ошибка обновления ембеда после setvoice:', e);
-        }
+        } catch (e) {}
     }
-
-    await interaction.editReply({ content: `Голосовой канал установлен: <#${selectedChannelId}>` });
 }
+
+
 

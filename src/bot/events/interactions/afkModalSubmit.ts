@@ -5,8 +5,8 @@ import { refreshAfkEmbed } from '../../lib/afkEmbed';
 import { v4 as uuid } from 'uuid';
 
 export async function handleAfkModalSubmit(interaction: ModalSubmitInteraction) {
-    // Acknowledge immediately to avoid interaction token expiry.
-    await interaction.deferReply({ ephemeral: true }).catch(() => {});
+    // Acknowledge immediately to gracefully close the modal silently.
+    await interaction.deferUpdate().catch(() => {});
     const timeStr = interaction.fields.getTextInputValue('afk_time').trim();
     const reason = interaction.fields.getTextInputValue('afk_reason').trim();
 
@@ -15,7 +15,7 @@ export async function handleAfkModalSubmit(interaction: ModalSubmitInteraction) 
     const match = timeStr.match(timeRegex);
 
     if (!match) {
-        return interaction.editReply({ content: '❌ Не удалось определить время. Пожалуйста, укажите ЧАСЫ МИНУТЫ (например, "до 14 30").' });
+        return interaction.followUp({ content: '❌ Не удалось определить время. Пожалуйста, укажите ЧАСЫ МИНУТЫ (например, "до 14 30").', ephemeral: true });
     }
 
     const hours = parseInt(match[1]);
@@ -48,12 +48,6 @@ export async function handleAfkModalSubmit(interaction: ModalSubmitInteraction) 
         status: 'active'
     });
 
-    const timeString = new Intl.DateTimeFormat('ru-RU', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit',
-        timeZone: 'Europe/Moscow'
-    }).format(targetMsk);
-
-    await interaction.editReply({ content: `✅ АФК успешно начат до **${timeString} (МСК)**.` });
+    // We do not send a success message to avoid cluttering temporary messages.
     await refreshAfkEmbed(interaction.client);
 }

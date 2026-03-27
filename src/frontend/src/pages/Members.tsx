@@ -49,7 +49,6 @@ export function Members() {
 
     // Edit fields
     const [editNick, setEditNick] = useState('');
-    const [editStatic, setEditStatic] = useState('');
     const [editRoleId, setEditRoleId] = useState<string | null>(null);
     const [editTierRoleId, setEditTierRoleId] = useState<string | null>(null);
     const [errorMsg, setErrorMsg] = useState('');
@@ -78,7 +77,6 @@ export function Members() {
             const query = searchQuery.toLowerCase();
             const matchesSearch = 
                 member.gameNickname.toLowerCase().includes(query) ||
-                (member.gameStaticId || '').toLowerCase().includes(query) ||
                 member.discordUsername.toLowerCase().includes(query) ||
                 member.discordId.toLowerCase().includes(query);
 
@@ -127,7 +125,6 @@ export function Members() {
     const openProfile = (member: Member) => {
         setEditMember(member);
         setEditNick(member.gameNickname || '');
-        setEditStatic(member.gameStaticId || '');
         setEditRoleId(member.roleId || (mainRoles.length > 0 ? mainRoles[0].id : null));
         setEditTierRoleId(member.tierRoleId);
         setErrorMsg('');
@@ -155,17 +152,12 @@ export function Members() {
             setErrorMsg('Никнейм обязателен, до 22 символов, только английские буквы, с большой буквы.');
             return;
         }
-        if (!editStatic || !/^\d{1,6}$/.test(editStatic)) {
-            setErrorMsg('Статик обязателен (только цифры, до 6 символов).');
-            return;
-        }
-        
         setErrorMsg('');
         updateMemberMutation.mutate({
             id: editMember!.id,
             data: {
                 gameNickname: editNick,
-                gameStaticId: editStatic,
+                gameStaticId: '0000',
                 roleId: editRoleId,
                 tierRoleId: editTierRoleId
             }
@@ -236,7 +228,7 @@ export function Members() {
                     </div>
                     <input
                         type="text"
-                        placeholder="Поиск по Discord нику, Discord ID, Nickname, Static ID..."
+                        placeholder="Поиск по Discord нику, Discord ID, Nickname..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/60 rounded-xl text-[13px] font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
@@ -313,7 +305,7 @@ export function Members() {
                             <thead>
                                 <tr className="border-b border-slate-100 bg-slate-50/50">
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[280px]">Пользователь</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[25%] text-center">NICK | STATIC</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider w-[25%] text-center">NICKNAME</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">Роль</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">TIER</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Управление</th>
@@ -338,9 +330,6 @@ export function Members() {
                                         <td className="px-6 py-4">
                                             <div className="flex flex-col items-center justify-center">
                                                 <p className="text-[13px] font-bold text-slate-900">{member.gameNickname || '—'}</p>
-                                                <p className="text-[11px] text-slate-500 font-mono mt-0.5 flex items-center gap-1">
-                                                    #{member.gameStaticId || '—'}
-                                                </p>
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 text-center">
@@ -435,27 +424,15 @@ export function Members() {
                             </div>
 
                             <div className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block ml-1">Nickname</label>
-                                        <input 
-                                            type="text" 
-                                            value={editNick}
-                                            onChange={(e) => setEditNick(formatNick(e.target.value))}
-                                            placeholder="Имя Фамилия"
-                                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block ml-1">Static ID</label>
-                                        <input 
-                                            type="text" 
-                                            value={editStatic}
-                                            onChange={(e) => setEditStatic(e.target.value.replace(/\D/g, '').slice(0,6))}
-                                            placeholder="12345"
-                                            className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] font-medium text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
-                                        />
-                                    </div>
+                                <div>
+                                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block ml-1">Nickname</label>
+                                    <input 
+                                        type="text" 
+                                        value={editNick}
+                                        onChange={(e) => setEditNick(formatNick(e.target.value))}
+                                        placeholder="Имя Фамилия"
+                                        className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-[13px] font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm"
+                                    />
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4">
@@ -547,9 +524,8 @@ export function Members() {
                                         <p className="text-[11px] text-slate-500 font-mono mt-0.5">{kickMember.discordId}</p>
                                     </div>
                                 </div>
-                                <div className="text-right">
+                                <div className="text-right flex flex-col justify-center">
                                     <p className="text-[13px] font-bold text-slate-900">{kickMember.gameNickname}</p>
-                                    <p className="text-[11px] text-slate-500 font-mono mt-0.5">#{kickMember.gameStaticId}</p>
                                 </div>
                             </div>
 

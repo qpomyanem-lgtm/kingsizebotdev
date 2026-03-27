@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -123,6 +123,17 @@ export function Archive() {
         );
     }, [archivedApps, searchQuery, statusFilter]);
 
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 20;
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [statusFilter, searchQuery]);
+
+    const totalPages = Math.ceil((filteredApps?.length || 0) / ITEMS_PER_PAGE);
+    const paginatedApps = filteredApps.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
     return (
         <div className="h-full flex flex-col font-sans">
             <header className="mb-6">
@@ -202,7 +213,7 @@ export function Archive() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {filteredApps.map(app => (
+                                {paginatedApps.map(app => (
                                     <tr key={app.id} className="hover:bg-slate-50/50 transition-colors">
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
@@ -236,6 +247,29 @@ export function Archive() {
                                 ))}
                             </tbody>
                         </table>
+                        {totalPages > 1 && (
+                            <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/50 mt-auto">
+                                <span className="text-[12px] font-medium text-slate-500">
+                                    Страница {currentPage} из {totalPages}
+                                </span>
+                                <div className="flex gap-1.5">
+                                    <button 
+                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                        disabled={currentPage === 1}
+                                        className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white transition-colors"
+                                    >
+                                        Назад
+                                    </button>
+                                    <button 
+                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                        disabled={currentPage === totalPages}
+                                        className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white transition-colors"
+                                    >
+                                        Вперед
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

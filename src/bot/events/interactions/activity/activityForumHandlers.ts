@@ -177,8 +177,8 @@ export async function rebuildActivityFromForum(client: Client, forumChannelId?: 
 
         if (!mappedMember) {
             const parsed = parseActivityThreadName(t?.name ?? '');
-            if (parsed?.gameStaticId) {
-                const candidates = await db.select().from(members).where(eq(members.gameStaticId, parsed.gameStaticId));
+            if (parsed?.gameNickname) {
+                const candidates = await db.select().from(members).where(eq(members.gameNickname, parsed.gameNickname));
                 mappedMember = candidates[0] ?? null;
             }
         }

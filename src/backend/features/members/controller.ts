@@ -106,7 +106,7 @@ export default async function membersController(fastify: FastifyInstance) {
 
             // If nick or static changed, update Discord nickname
             if (data.gameNickname !== undefined || data.gameStaticId !== undefined) {
-                const newNick = `${updated.gameNickname} | ${updated.gameStaticId}`;
+                const newNick = updated.gameNickname;
                 await setNickname(updated.discordId, newNick);
             }
 

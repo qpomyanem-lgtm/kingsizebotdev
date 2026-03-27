@@ -37,7 +37,7 @@ declare module 'discord.js' {
 client.commands = new Collection();
 
 import { connectDB, db } from '../db/index.js';
-import { events, applications } from '../db/schema.js';
+import { events, applications, systemSettings } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 
 async function startBot() {
@@ -58,7 +58,7 @@ async function startBot() {
             try {
                 if (!eventId) throw new Error('No eventId provided');
                 const [event] = await db.select().from(events).where(eq(events.id, eventId));
-                
+
                 if (event && event.channelId && event.messageId) {
                     const channel = await client.channels.fetch(event.channelId);
                     if (channel && channel.isTextBased()) {
@@ -82,19 +82,38 @@ async function startBot() {
                 if (app && app.discordId) {
                     const user = await client.users.fetch(app.discordId).catch(() => null);
                     if (user) {
-                        const embed = new EmbedBuilder()
-                            .setTitle('📞 Обзвон назначен')
-                            .setDescription('Администрация готова провести обзвон по вашей заявке. Нажмите кнопку ниже, когда вы будете готовы к обзвону.')
-                            .setColor(Colors.Blue);
-                        
-                        const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-                            new ButtonBuilder()
-                                .setCustomId(`interview_ready_${app.id}`)
-                                .setLabel('К обзвону готов')
-                                .setStyle(ButtonStyle.Success)
-                        );
-                        
-                        await user.send({ embeds: [embed], components: [row] });
+                        const rawPayload = {
+                            flags: 32768,
+                            allowed_mentions: { parse: [] },
+                            components: [
+                                {
+                                    type: 17,
+                                    components: [
+                                        {
+                                            type: 10,
+                                            content: "### <:interview:1486750210964062368> **Обзвон назначен**\n\n***Администрация готова провести обзвон по вашей заявке. Нажмите кнопку ниже, когда вы будете готовы к обзвону.***"
+                                        },
+                                        {
+                                            type: 1,
+                                            components: [
+                                                {
+                                                    type: 2,
+                                                    style: 2,
+                                                    label: "К ОБЗВОНУ ГОТОВ",
+                                                    custom_id: `interview_ready_${app.id}`,
+                                                    emoji: {
+                                                        id: "1486751177621246144",
+                                                        name: "telephone"
+                                                    }
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        };
+
+                        await (user as any).send(rawPayload);
                     }
                 }
                 res.writeHead(200);
@@ -116,19 +135,113 @@ async function startBot() {
                     if (app && app.discordId) {
                         const user = await client.users.fetch(app.discordId).catch(() => null);
                         if (user) {
-                            const embed = new EmbedBuilder()
-                                .setAuthor({ name: data.adminUsername || 'Администратор' })
-                                .setDescription(data.content || '')
-                                .setColor(Colors.Blurple)
-                                .setTimestamp();
-                            
-                            await user.send({ embeds: [embed] });
+                            const adminName = data.adminUsername || 'Администратор';
+                            const msgContent = data.content || '';
+                            const rawPayload = {
+                                flags: 32768,
+                                allowed_mentions: { parse: [] },
+                                components: [
+                                    {
+                                        type: 17,
+                                        components: [
+                                            {
+                                                type: 10,
+                                                content: `### <:message:1486754131069894657> **Сообщение от администратора**\n**${adminName}:**\n> ***${msgContent}***\n-# Вы можете ответить администратору, написав сообщение прямо в этот чат.`
+                                            }
+                                        ]
+                                    }
+                                ]
+                            };
+
+                            await (user as any).send(rawPayload);
                         }
                     }
                     res.writeHead(200);
                     res.end('OK');
                 } catch (err) {
                     console.error('❌ [IPC Сервер] Ошибка send-interview-message:', err);
+                    res.writeHead(500);
+                    res.end('Error');
+                }
+            });
+            return;
+        } else if (req.method === 'POST' && req.url?.startsWith('/ipc/send-reject-dm/')) {
+            const appId = req.url.split('/').pop();
+            let body = '';
+            req.on('data', chunk => { body += chunk.toString(); });
+            req.on('end', async () => {
+                try {
+                    const data = JSON.parse(body);
+                    if (!appId) throw new Error('No appId provided');
+                    const [app] = await db.select().from(applications).where(eq(applications.id, appId));
+                    if (app && app.discordId) {
+                        const user = await client.users.fetch(app.discordId).catch(() => null);
+                        if (user) {
+                            const reason = data.reason || 'Не указана';
+                            const rawPayload = {
+                                flags: 32768,
+                                allowed_mentions: { parse: [] },
+                                components: [
+                                    {
+                                        type: 17,
+                                        components: [
+                                            {
+                                                type: 10,
+                                                content: `### <:reject:1486758295510323260> **ЗАЯВКА ОТКЛОНЕНА**\n\n***К сожалению, ваша заявка была отклонена.***\n> ***Причина: *** ${reason}`
+                                            }
+                                        ]
+                                    }
+                                ]
+                            };
+                            await (user as any).send(rawPayload);
+                        }
+                    }
+                    res.writeHead(200);
+                    res.end('OK');
+                } catch (err) {
+                    console.error('❌ [IPC Сервер] Ошибка send-reject-dm:', err);
+                    res.writeHead(500);
+                    res.end('Error');
+                }
+            });
+            return;
+        } else if (req.method === 'POST' && req.url?.startsWith('/ipc/send-accept-dm/')) {
+            const appId = req.url.split('/').pop();
+            let body = '';
+            req.on('data', chunk => { body += chunk.toString(); });
+            req.on('end', async () => {
+                try {
+                    const data = JSON.parse(body);
+                    if (!appId) throw new Error('No appId provided');
+                    const [app] = await db.select().from(applications).where(eq(applications.id, appId));
+                    if (app && app.discordId) {
+                        const user = await client.users.fetch(app.discordId).catch(() => null);
+                        if (user) {
+                            const newNickname = data.newNickname || 'Не указан';
+                            const roleName = data.roleName || 'Новенький';
+
+                            const rawPayload = {
+                                flags: 32768,
+                                allowed_mentions: { parse: [] },
+                                components: [
+                                    {
+                                        type: 17,
+                                        components: [
+                                            {
+                                                type: 10,
+                                                content: `### <:accept:1486758313252098300> **ЗАЯВКА ПРИНЯТА**\n\n***Поздравляем, ${app.discordUsername}!***\n***Добро пожаловать в KINGSIZE LEGENDARY!***\n***Твой никнейм на сервере изменен на: ${newNickname}***\n***Выдана роль: ${roleName}***`
+                                            }
+                                        ]
+                                    }
+                                ]
+                            };
+                            await (user as any).send(rawPayload);
+                        }
+                    }
+                    res.writeHead(200);
+                    res.end('OK');
+                } catch (err) {
+                    console.error('❌ [IPC Сервер] Ошибка send-accept-dm:', err);
                     res.writeHead(500);
                     res.end('Error');
                 }
@@ -170,6 +283,49 @@ async function startBot() {
                 res.end('OK');
             } catch (err) {
                 console.error('❌ [IPC Сервер] Ошибка update-activity-message:', err);
+                res.writeHead(500);
+                res.end('Error');
+            }
+        } else if (req.method === 'POST' && req.url === '/ipc/refresh-ticket-panel') {
+            try {
+                const { buildTicketsPanelPayload } = await import('./embeds/panels/ticketsPanel.js');
+                const [appOpenRow] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'APPLICATIONS_OPEN'));
+                const applicationsOpen = appOpenRow?.value === 'true';
+                const payload = buildTicketsPanelPayload(applicationsOpen);
+
+                const [channelRow] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'TICKETS_CHANNEL_ID'));
+                const [messageRow] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'TICKETS_MESSAGE_ID'));
+                const channelId = channelRow?.value;
+                const messageId = messageRow?.value;
+
+                if (channelId) {
+                    const channel = await client.channels.fetch(channelId);
+                    if (channel && channel.isTextBased()) {
+                        let edited = false;
+                        if (messageId) {
+                            try {
+                                const msg = await channel.messages.fetch(messageId);
+                                await msg.edit(payload);
+                                edited = true;
+                            } catch {
+                                // Message was deleted — reset and resend
+                            }
+                        }
+                        if (!edited) {
+                            const newMsg = await (channel as any).send(payload);
+                            // Update message ID in DB
+                            if (messageRow) {
+                                await db.update(systemSettings).set({ value: newMsg.id }).where(eq(systemSettings.key, 'TICKETS_MESSAGE_ID'));
+                            } else {
+                                await db.insert(systemSettings).values({ key: 'TICKETS_MESSAGE_ID', value: newMsg.id });
+                            }
+                        }
+                    }
+                }
+                res.writeHead(200);
+                res.end('OK');
+            } catch (err) {
+                console.error('❌ [IPC Сервер] Ошибка refresh-ticket-panel:', err);
                 res.writeHead(500);
                 res.end('Error');
             }

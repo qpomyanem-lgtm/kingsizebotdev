@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Server, Save, Loader2, Lock, RefreshCcw, CheckCircle2, Hash, ImageIcon, Type, Download, Upload, FileJson } from 'lucide-react';
+import { Server, Save, Loader2, Lock, RefreshCcw, CheckCircle2, Hash, ImageIcon, Type, Download, Upload, FileJson, ClipboardList, ToggleLeft, ToggleRight } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { api, useAuth } from '../lib/api';
 
@@ -34,6 +34,27 @@ export function ServerSettings() {
       setLocalLogoUrl(systemSettingsData.find(s => s.key === 'LOGO_URL')?.value || '');
     }
   }, [systemSettingsData]);
+
+  const applicationsOpen = systemSettingsData?.find(s => s.key === 'APPLICATIONS_OPEN')?.value === 'true';
+  const activityEnabled = systemSettingsData?.find(s => s.key === 'NEW_MEMBER_ACTIVITY_ENABLED')?.value !== 'false';
+
+  const toggleApplicationsMutation = useMutation({
+    mutationFn: async (open: boolean) => {
+      await api.patch('/api/settings/system', { updates: [{ key: 'APPLICATIONS_OPEN', value: open ? 'true' : 'false' }] });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['systemSettings'] });
+    }
+  });
+
+  const toggleActivityMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      await api.patch('/api/settings/system', { updates: [{ key: 'NEW_MEMBER_ACTIVITY_ENABLED', value: enabled ? 'true' : 'false' }] });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['systemSettings'] });
+    }
+  });
 
   const updateSystemMutation = useMutation({
     mutationFn: async (updates: Array<{ key: string, value: string | null }>) => {
@@ -297,6 +318,79 @@ export function ServerSettings() {
                         />
                       )}
                     </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Applications toggle section */}
+        <section>
+          <h2 className="text-[11px] font-bold tracking-[0.2em] text-slate-400 uppercase mb-3 px-2">Управление заявками</h2>
+          <div className="bg-white rounded-[24px] border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.02)] overflow-hidden">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50/50">
+                  <th className="text-xs font-semibold tracking-wider text-slate-500 uppercase py-4 px-6 w-[280px]">Параметр</th>
+                  <th className="text-xs font-semibold tracking-wider text-slate-500 uppercase py-4 px-6">Управление</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
+                  <td className="py-4 px-6 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-500 flex items-center justify-center shrink-0">
+                      <ClipboardList className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-[13px] text-slate-800">Приём заявок</div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 max-w-[220px]">Когда закрыто — кнопка «Подать заявку» в Discord будет неактивна</div>
+                    </div>
+                  </td>
+                  <td className="py-4 px-6">
+                    <button
+                      onClick={() => toggleApplicationsMutation.mutate(!applicationsOpen)}
+                      disabled={toggleApplicationsMutation.isPending}
+                      className={cn(
+                        "flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-[13px] font-bold transition-all shadow-sm active:scale-[0.98] disabled:opacity-50",
+                        applicationsOpen
+                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+                          : "bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200"
+                      )}
+                    >
+                      {applicationsOpen
+                        ? <><ToggleRight className="w-5 h-5 text-emerald-500" /> Заявки открыты</>
+                        : <><ToggleLeft className="w-5 h-5 text-slate-400" /> Заявки закрыты</>
+                      }
+                    </button>
+                  </td>
+                </tr>
+                <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
+                  <td className="py-4 px-6 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-500 flex items-center justify-center shrink-0">
+                      <ClipboardList className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-[13px] text-slate-800">Создание активности</div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 max-w-[220px]">Когда выключено — ветка активности при принятии новой заявки не создается</div>
+                    </div>
+                  </td>
+                  <td className="py-4 px-6">
+                    <button
+                      onClick={() => toggleActivityMutation.mutate(!activityEnabled)}
+                      disabled={toggleActivityMutation.isPending}
+                      className={cn(
+                        "flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-[13px] font-bold transition-all shadow-sm active:scale-[0.98] disabled:opacity-50",
+                        activityEnabled
+                          ? "bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100"
+                          : "bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200"
+                      )}
+                    >
+                      {activityEnabled
+                        ? <><ToggleRight className="w-5 h-5 text-indigo-500" /> Активность Вкл.</>
+                        : <><ToggleLeft className="w-5 h-5 text-slate-400" /> Активность Выкл.</>
+                      }
+                    </button>
                   </td>
                 </tr>
               </tbody>

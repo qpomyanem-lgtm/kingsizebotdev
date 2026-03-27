@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Users, ClipboardCheck, LogOut, ChevronLeft, ChevronRight, UserX, Archive, BookOpen, ScrollText, ShieldAlert, Hash, ChevronDown, ClipboardList, Moon, Target, Swords, Server, Map, Activity as ActivityIcon, KeyRound } from 'lucide-react';
+import { Users, ClipboardCheck, LogOut, ChevronLeft, ChevronRight, UserX, Archive, BookOpen, ScrollText, ShieldAlert, Hash, ChevronDown, ClipboardList, Moon, Swords, Server, Activity as ActivityIcon, KeyRound } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '../../lib/utils';
 import { api, useAuth } from '../../lib/api';
@@ -20,15 +20,8 @@ const navGroups = [
     label: 'Состав',
     items: [
       { path: '/members', label: 'Участники', icon: Users },
+      { path: '/captures', label: 'Списки', icon: Swords },
       { path: '/afk', label: 'Система АФК', icon: Moon },
-    ],
-  },
-  {
-    label: 'События',
-    items: [
-      { path: '/mcl', label: 'MCL ВЗЗ', icon: Swords },
-      { path: '/captures', label: 'Капты', icon: Target },
-      { path: '/mcl-maps', label: 'Карты MCL ВЗЗ', icon: Map },
     ],
   },
   {
@@ -155,10 +148,8 @@ export function DashboardLayout() {
               '/activity': 'site:activity:view',
               '/guide': 'site:guide:view',
               '/members': 'site:members:view',
-              '/afk': 'site:afk:view',
-              '/mcl': 'site:mcl:view',
               '/captures': 'site:captures:view',
-              '/mcl-maps': 'site:mcl_maps:view',
+              '/afk': 'site:afk:view',
               '/archive': 'site:archive:view',
               '/logs': 'site:logs:view',
               '/kicked': 'site:kicked:view',

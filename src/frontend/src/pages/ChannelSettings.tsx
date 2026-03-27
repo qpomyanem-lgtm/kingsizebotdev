@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, useAuth } from '../lib/api';
-import { Hash, Save, AlertCircle, Loader2, Ticket, Calendar, Moon, Activity, ListChecks, Volume2 } from 'lucide-react';
+import { Hash, Save, AlertCircle, Loader2, Ticket, Calendar, Moon, Activity, ListChecks } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface SystemSetting {
@@ -15,10 +15,7 @@ export function ChannelSettings() {
 
   const [ticketsChannelId, setTicketsChannelId] = useState('');
   const [eventsChannelId, setEventsChannelId] = useState('');
-  const [eventMclChannelId, setEventMclChannelId] = useState('');
   const [eventCaptChannelId, setEventCaptChannelId] = useState('');
-  const [eventMclVoiceChannelId, setEventMclVoiceChannelId] = useState('');
-  const [eventCaptVoiceChannelId, setEventCaptVoiceChannelId] = useState('');
   const [afkChannelId, setAfkChannelId] = useState('');
   const [onlineChannelId, setOnlineChannelId] = useState('');
   const [activityForumChannelId, setActivityForumChannelId] = useState('');
@@ -38,10 +35,7 @@ export function ChannelSettings() {
     if (systemSettingsData) {
       setTicketsChannelId(systemSettingsData.find(s => s.key === 'TICKETS_CHANNEL_ID')?.value || '');
       setEventsChannelId(systemSettingsData.find(s => s.key === 'EVENTS_CHANNEL_ID')?.value || '');
-      setEventMclChannelId(systemSettingsData.find(s => s.key === 'EVENT_MCL_CHANNEL_ID')?.value || '');
       setEventCaptChannelId(systemSettingsData.find(s => s.key === 'EVENT_CAPT_CHANNEL_ID')?.value || '');
-      setEventMclVoiceChannelId(systemSettingsData.find(s => s.key === 'EVENT_MCL_VOICE_CHANNEL_ID')?.value || '');
-      setEventCaptVoiceChannelId(systemSettingsData.find(s => s.key === 'EVENT_CAPT_VOICE_CHANNEL_ID')?.value || '');
       setAfkChannelId(systemSettingsData.find(s => s.key === 'AFK_CHANNEL_ID')?.value || '');
       setOnlineChannelId(systemSettingsData.find(s => s.key === 'ONLINE_CHANNEL_ID')?.value || '');
       setActivityForumChannelId(systemSettingsData.find(s => s.key === 'ACTIVITY_FORUM_CHANNEL_ID')?.value || '');
@@ -83,23 +77,10 @@ export function ChannelSettings() {
       ...getUpdatePayload('ONLINE_CHANNEL_ID', onlineChannelId, systemSettingsData, 'ONLINE_MESSAGE_ID'),
     ];
 
-    // EVENT_MCL_CHANNEL_ID and EVENT_CAPT_CHANNEL_ID don't have MESSAGE_IDs to reset
-    const oldMclChannelId = systemSettingsData?.find(s => s.key === 'EVENT_MCL_CHANNEL_ID')?.value || '';
-    if (oldMclChannelId !== eventMclChannelId) {
-      updates.push({ key: 'EVENT_MCL_CHANNEL_ID', value: eventMclChannelId || null });
-    }
+    // EVENT_CAPT_CHANNEL_ID doesn't have MESSAGE_ID to reset
     const oldCaptChannelId = systemSettingsData?.find(s => s.key === 'EVENT_CAPT_CHANNEL_ID')?.value || '';
     if (oldCaptChannelId !== eventCaptChannelId) {
       updates.push({ key: 'EVENT_CAPT_CHANNEL_ID', value: eventCaptChannelId || null });
-    }
-
-    const oldMclVoiceId = systemSettingsData?.find(s => s.key === 'EVENT_MCL_VOICE_CHANNEL_ID')?.value || '';
-    if (oldMclVoiceId !== eventMclVoiceChannelId) {
-      updates.push({ key: 'EVENT_MCL_VOICE_CHANNEL_ID', value: eventMclVoiceChannelId || null });
-    }
-    const oldCaptVoiceId = systemSettingsData?.find(s => s.key === 'EVENT_CAPT_VOICE_CHANNEL_ID')?.value || '';
-    if (oldCaptVoiceId !== eventCaptVoiceChannelId) {
-      updates.push({ key: 'EVENT_CAPT_VOICE_CHANNEL_ID', value: eventCaptVoiceChannelId || null });
     }
 
     const oldActivityForumId = systemSettingsData?.find(s => s.key === 'ACTIVITY_FORUM_CHANNEL_ID')?.value || '';
@@ -118,10 +99,7 @@ export function ChannelSettings() {
   const hasChanges = 
     ticketsChannelId !== (systemSettingsData?.find(s => s.key === 'TICKETS_CHANNEL_ID')?.value || '') ||
     eventsChannelId !== (systemSettingsData?.find(s => s.key === 'EVENTS_CHANNEL_ID')?.value || '') ||
-    eventMclChannelId !== (systemSettingsData?.find(s => s.key === 'EVENT_MCL_CHANNEL_ID')?.value || '') ||
     eventCaptChannelId !== (systemSettingsData?.find(s => s.key === 'EVENT_CAPT_CHANNEL_ID')?.value || '') ||
-    eventMclVoiceChannelId !== (systemSettingsData?.find(s => s.key === 'EVENT_MCL_VOICE_CHANNEL_ID')?.value || '') ||
-    eventCaptVoiceChannelId !== (systemSettingsData?.find(s => s.key === 'EVENT_CAPT_VOICE_CHANNEL_ID')?.value || '') ||
     afkChannelId !== (systemSettingsData?.find(s => s.key === 'AFK_CHANNEL_ID')?.value || '') ||
     onlineChannelId !== (systemSettingsData?.find(s => s.key === 'ONLINE_CHANNEL_ID')?.value || '') ||
     activityForumChannelId !== (systemSettingsData?.find(s => s.key === 'ACTIVITY_FORUM_CHANNEL_ID')?.value || '');
@@ -244,32 +222,7 @@ export function ChannelSettings() {
                 </td>
               </tr>
 
-              {/* Event MCL Channel */}
-              <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
-                <td className="py-4 px-6 flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-500 flex items-center justify-center shrink-0">
-                    <ListChecks className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="font-semibold text-[13px] text-slate-800">Списки MCL / ВЗЗ</div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">Канал для отправки списков MCL и ВЗЗ</div>
-                  </div>
-                </td>
-                <td className="py-4 px-6">
-                  <div className="relative max-w-sm">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Hash className="h-3.5 w-3.5 text-slate-400" />
-                    </div>
-                    <input
-                      type="text"
-                      value={eventMclChannelId}
-                      onChange={(e) => setEventMclChannelId(e.target.value)}
-                      placeholder="Пример: 123456789012345678"
-                      className="w-full bg-slate-50/50 border border-slate-200 text-slate-900 text-[13px] rounded-lg pl-8 pr-3 py-2 outline-none transition-all placeholder:text-slate-300 focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 font-mono"
-                    />
-                  </div>
-                </td>
-              </tr>
+
 
               {/* Event Capt Channel */}
               <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
@@ -298,59 +251,7 @@ export function ChannelSettings() {
                 </td>
               </tr>
 
-              {/* Event MCL Voice Channel */}
-              <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
-                <td className="py-4 px-6 flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-500 flex items-center justify-center shrink-0">
-                    <Volume2 className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="font-semibold text-[13px] text-slate-800">Голосовой канал MCL / ВЗЗ</div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">Голосовой канал для мероприятий MCL и ВЗЗ</div>
-                  </div>
-                </td>
-                <td className="py-4 px-6">
-                  <div className="relative max-w-sm">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Hash className="h-3.5 w-3.5 text-slate-400" />
-                    </div>
-                    <input
-                      type="text"
-                      value={eventMclVoiceChannelId}
-                      onChange={(e) => setEventMclVoiceChannelId(e.target.value)}
-                      placeholder="Пример: 123456789012345678"
-                      className="w-full bg-slate-50/50 border border-slate-200 text-slate-900 text-[13px] rounded-lg pl-8 pr-3 py-2 outline-none transition-all placeholder:text-slate-300 focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 font-mono"
-                    />
-                  </div>
-                </td>
-              </tr>
 
-              {/* Event Capt Voice Channel */}
-              <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
-                <td className="py-4 px-6 flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-orange-50 text-orange-500 flex items-center justify-center shrink-0">
-                    <Volume2 className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="font-semibold text-[13px] text-slate-800">Голосовой канал Капт</div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">Голосовой канал для мероприятий Капт</div>
-                  </div>
-                </td>
-                <td className="py-4 px-6">
-                  <div className="relative max-w-sm">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Hash className="h-3.5 w-3.5 text-slate-400" />
-                    </div>
-                    <input
-                      type="text"
-                      value={eventCaptVoiceChannelId}
-                      onChange={(e) => setEventCaptVoiceChannelId(e.target.value)}
-                      placeholder="Пример: 123456789012345678"
-                      className="w-full bg-slate-50/50 border border-slate-200 text-slate-900 text-[13px] rounded-lg pl-8 pr-3 py-2 outline-none transition-all placeholder:text-slate-300 focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 font-mono"
-                    />
-                  </div>
-                </td>
-              </tr>
 
               {/* AFK */}
               <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">

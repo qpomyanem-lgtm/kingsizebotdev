@@ -2,26 +2,22 @@ import {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    ContainerBuilder,
-    MessageFlags,
-    SeparatorBuilder,
-    SeparatorSpacingSize,
-    TextDisplayBuilder,
 } from 'discord.js';
 
-export function buildEventsPanelComponents(): { components: any[]; flags: number } {
-    const container = new ContainerBuilder()
-        .setAccentColor(0x5865f2)
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 📅 Списки на мероприятия'))
-        .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent('Нажмите кнопку ниже для создания списка участников на мероприятие.'))
-        .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large))
-        .addActionRowComponents(
-            new ActionRowBuilder<ButtonBuilder>().addComponents(
-                new ButtonBuilder().setCustomId('event_create_btn').setLabel('📋 Создать список').setStyle(ButtonStyle.Primary),
-            ),
-        );
+const LIST_IMAGE_URL = 'https://cdn.discordapp.com/attachments/1483197483344593020/1486775268629544960/Gemini_Generated_Image_mir0p7mir0p7mir0.png?ex=69c6bade&is=69c5695e&hm=14d33344c58b61dd9368384d571b2c2d7b5d7fde3f1f1cf474237857bcc789b0&';
+export function buildEventsPanelComponents() {
+    const button = new ButtonBuilder()
+        .setCustomId('event_create_btn')
+        .setLabel('СОЗДАТЬ СПИСОК')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('1486775719811088455');
 
-    return { components: [container], flags: MessageFlags.IsComponentsV2 };
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(button);
+
+    return { 
+        content: LIST_IMAGE_URL,
+        embeds: [],
+        components: [row],
+    };
 }
 

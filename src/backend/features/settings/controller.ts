@@ -308,6 +308,13 @@ export default async function settingsController(fastify: FastifyInstance) {
           }
         }
 
+        // If APPLICATIONS_OPEN was changed, refresh the ticket panel in Discord
+        const applicationsOpenUpdate = body.updates.find(u => u.key === 'APPLICATIONS_OPEN');
+        if (applicationsOpenUpdate) {
+          const IPC_BOT_BASE_URL = process.env.IPC_BOT_BASE_URL || 'http://localhost:3001';
+          fetch(`${IPC_BOT_BASE_URL}/ipc/refresh-ticket-panel`, { method: 'POST' }).catch(() => {});
+        }
+
         reply.send({ success: true });
       } catch (error) {
         console.error('❌ Ошибка настроек:', error);

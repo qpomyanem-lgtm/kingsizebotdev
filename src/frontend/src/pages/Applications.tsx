@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, useAuth } from '../lib/api';
 import { formatMoscowDate } from '../lib/time';
 import { Clock, PhoneCall, Check, X, Eye, Users, UserCheck, UserX, AlertCircle, ClipboardCheck, Search, Filter } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { io, Socket } from 'socket.io-client';
 
 export interface Application {
     id: string;
@@ -33,9 +34,7 @@ export function Applications() {
     // Modals state
     const [acceptAppId, setAcceptAppId] = useState<string | null>(null);
     const [nick, setNick] = useState('');
-    const [staticId, setStaticId] = useState('');
-    const [nickError, setNickError] = useState('');
-    const [staticError, setStaticError] = useState('');
+    const [nicknameError, setNicknameError] = useState('');
 
     const [rejectAppId, setRejectAppId] = useState<string | null>(null);
     const [rejectReason, setRejectReason] = useState('');
@@ -48,6 +47,23 @@ export function Applications() {
         }
     });
 
+    // Live refresh via Socket.IO
+    useEffect(() => {
+        const HOST_URL = typeof window !== 'undefined' ? window.location.origin.replace('admin.', '') : 'http://localhost:3000';
+        const socket: Socket = io(import.meta.env.VITE_API_URL || HOST_URL, {
+            withCredentials: true,
+            transports: ['websocket', 'polling'],
+        });
+
+        socket.on('applications_refresh', () => {
+            queryClient.invalidateQueries({ queryKey: ['applications'] });
+        });
+
+        return () => {
+            socket.close();
+        };
+    }, [queryClient]);
+
     const { data: fieldLabels } = useQuery<{ key: string, label: string }[]>({
         queryKey: ['application-fields'],
         queryFn: async () => {
@@ -57,16 +73,14 @@ export function Applications() {
     });
 
     const updateStatusMutation = useMutation({
-        mutationFn: async ({ id, status, gameNickname, gameStaticId, rejectionReason }: {
+        mutationFn: async ({ id, status, gameNickname, rejectionReason }: {
             id: string,
             status: string,
             gameNickname?: string,
-            gameStaticId?: string,
             rejectionReason?: string
         }) => {
             const payload: any = { status };
             if (gameNickname) payload.gameNickname = gameNickname;
-            if (gameStaticId) payload.gameStaticId = gameStaticId;
             if (rejectionReason) payload.rejectionReason = rejectionReason;
 
             const { data } = await api.patch(`/api/applications/${id}/status`, payload);
@@ -89,9 +103,7 @@ export function Applications() {
     const closeModals = () => {
         setAcceptAppId(null);
         setNick('');
-        setStaticId('');
-        setNickError('');
-        setStaticError('');
+        setNicknameError('');
 
         setRejectAppId(null);
         setRejectReason('');
@@ -107,20 +119,16 @@ export function Applications() {
     const handleAcceptSubmit = () => {
         let valid = true;
         if (!nick || nick.length > 22) {
-            setNickError('Никнейм обязателен и не больше 22 символов');
+            setNicknameError('Никнейм обязателен и не больше 22 символов');
             valid = false;
         } else if (!/^[A-Z]/.test(nick)) {
-            setNickError('Никнейм должен начинаться с большой буквы');
+            setNicknameError('Никнейм должен начинаться с большой буквы');
+            valid = false;
+        } else if (nick.length < 3) {
+            setNicknameError('Имя персонажа слишком короткое');
             valid = false;
         } else {
-            setNickError('');
-        }
-
-        if (!staticId || !/^\d{1,6}$/.test(staticId)) {
-            setStaticError('Статик обязателен (только цифры, до 6 символов)');
-            valid = false;
-        } else {
-            setStaticError('');
+            setNicknameError('');
         }
 
         if (!canManageApplications) return;
@@ -130,7 +138,6 @@ export function Applications() {
                 id: acceptAppId,
                 status: 'accepted',
                 gameNickname: nick,
-                gameStaticId: staticId
             });
         }
     };
@@ -172,6 +179,17 @@ export function Applications() {
             return matchesFilter && matchesSearch;
         });
     }, [applications, filter, searchQuery]);
+
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 20;
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [filter, searchQuery]);
+
+    const totalPages = Math.ceil((filteredApps?.length || 0) / ITEMS_PER_PAGE);
+    const paginatedApps = filteredApps.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
     const getStatusBadge = (status: string) => {
         switch (status) {
@@ -278,7 +296,7 @@ export function Applications() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {filteredApps.map(app => (
+                                {paginatedApps.map(app => (
                                     <tr key={app.id} className="hover:bg-slate-50/50 transition-colors group">
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
@@ -386,6 +404,29 @@ export function Applications() {
                                 ))}
                             </tbody>
                         </table>
+                        {totalPages > 1 && (
+                            <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50/50 mt-auto">
+                                <span className="text-[12px] font-medium text-slate-500">
+                                    Страница {currentPage} из {totalPages}
+                                </span>
+                                <div className="flex gap-1.5">
+                                    <button 
+                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                        disabled={currentPage === 1}
+                                        className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white transition-colors"
+                                    >
+                                        Назад
+                                    </button>
+                                    <button 
+                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                        disabled={currentPage === totalPages}
+                                        className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white transition-colors"
+                                    >
+                                        Вперед
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -453,19 +494,7 @@ export function Applications() {
                                     placeholder="Например: John Cena"
                                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 text-[14px] font-bold text-slate-900 rounded-2xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-center tracking-wide placeholder:font-medium placeholder:tracking-normal placeholder:text-slate-400"
                                 />
-                                {nickError && <p className="text-rose-500 text-[11px] font-semibold mt-1.5 flex items-center justify-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{nickError}</p>}
-                            </div>
-                            <div>
-                                <label className="block text-[12px] font-bold text-slate-700 mb-1.5 uppercase tracking-wider text-center">Статик ID</label>
-                                <input 
-                                    type="text" 
-                                    value={staticId}
-                                    onChange={e => setStaticId(e.target.value.replace(/\D/g, ''))}
-                                    placeholder="123456"
-                                    maxLength={6}
-                                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 text-[14px] font-bold text-slate-900 rounded-2xl focus:outline-none focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-center tracking-[0.2em] placeholder:font-medium placeholder:tracking-normal placeholder:text-slate-400"
-                                />
-                                {staticError && <p className="text-rose-500 text-[11px] font-semibold mt-1.5 flex items-center justify-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{staticError}</p>}
+                                {nicknameError && <p className="text-rose-500 text-[11px] font-semibold mt-1.5 flex items-center justify-center gap-1"><AlertCircle className="w-3.5 h-3.5" />{nicknameError}</p>}
                             </div>
                         </div>
                         <div className="px-6 pb-6 pt-2 flex gap-3">
