@@ -15,7 +15,7 @@ declare module 'fastify' {
 
 import { members } from '../../../db/schema';
 import { randomUUID } from 'crypto';
-import { addRole, getRoleIdByPurpose, setNickname } from '../../lib/discordMemberActions.js';
+import { addRole, removeRole, getRoleIdByPurpose, getDiscordRoleIdBySystemType, setNickname } from '../../lib/discordMemberActions.js';
 
 const IPC_BOT_BASE_URL = process.env.IPC_BOT_BASE_URL || 'http://localhost:3001';
 
@@ -129,17 +129,43 @@ export default async function applicationsController(fastify: FastifyInstance) {
                 .where(eq(applications.id, id))
                 .returning();
 
-            // Trigger Bot IPC for DM (Interview)
+            // Trigger Bot IPC for DM (Interview) + assign interview role
             if (status === 'interview' && existingApp.status !== 'interview') {
                 try {
                     await fetch(`${IPC_BOT_BASE_URL}/ipc/send-interview-dm/${id}`, { method: 'POST' });
                 } catch (ipcErr) {
                     console.error('❌ Ошибка связи с ботом для отправки ЛС об обзвоне:', ipcErr);
                 }
+
+                // Assign the "Обзвон" (interview) Discord role
+                try {
+                    const interviewDiscordRoleId = await getDiscordRoleIdBySystemType('interview');
+                    if (interviewDiscordRoleId) {
+                        const result = await addRole(existingApp.discordId, interviewDiscordRoleId);
+                        console.log('✅ [ОБЗВОН] Роль обзвона выдана:', result);
+                    } else {
+                        console.warn('⚠️ [ОБЗВОН] Роль обзвона не настроена в системе');
+                    }
+                } catch (roleErr) {
+                    console.error('❌ [ОБЗВОН] Ошибка выдачи роли обзвона:', roleErr);
+                }
             }
 
-            // Trigger Bot IPC for DM (Rejection)
+            // Trigger Bot IPC for DM (Rejection) + remove interview role
             if (status === 'rejected' && existingApp.status !== 'rejected') {
+                // Remove the "Обзвон" (interview) role if it was assigned
+                if (existingApp.status === 'interview' || existingApp.status === 'interview_ready') {
+                    try {
+                        const interviewDiscordRoleId = await getDiscordRoleIdBySystemType('interview');
+                        if (interviewDiscordRoleId) {
+                            const result = await removeRole(existingApp.discordId, interviewDiscordRoleId);
+                            console.log('✅ [ОТКЛОНЕНИЕ] Роль обзвона снята:', result);
+                        }
+                    } catch (roleErr) {
+                        console.error('❌ [ОТКЛОНЕНИЕ] Ошибка снятия роли обзвона:', roleErr);
+                    }
+                }
+
                 try {
                     await fetch(`${IPC_BOT_BASE_URL}/ipc/send-reject-dm/${id}`, {
                         method: 'POST',
@@ -153,6 +179,19 @@ export default async function applicationsController(fastify: FastifyInstance) {
 
             // Handle Member logic if accepted
             if (status === 'accepted') {
+                // Remove the "Обзвон" (interview) role if it was assigned
+                if (existingApp.status === 'interview' || existingApp.status === 'interview_ready') {
+                    try {
+                        const interviewDiscordRoleId = await getDiscordRoleIdBySystemType('interview');
+                        if (interviewDiscordRoleId) {
+                            const result = await removeRole(existingApp.discordId, interviewDiscordRoleId);
+                            console.log('✅ [ПРИНЯТИЕ] Роль обзвона снята:', result);
+                        }
+                    } catch (roleErr) {
+                        console.error('❌ [ПРИНЯТИЕ] Ошибка снятия роли обзвона:', roleErr);
+                    }
+                }
+
                 console.log('=== [ПРИНЯТИЕ] Запуск процедуры принятия ===');
                 console.log('📌 [ПРИНЯТИЕ] Заявка:', existingApp.id, 'Discord:', existingApp.discordId);
                 console.log('📌 [ПРИНЯТИЕ] Ник:', gameNickname, 'Статик:', gameStaticId);
@@ -379,8 +418,17 @@ export default async function applicationsController(fastify: FastifyInstance) {
         try {
             const { id } = request.params as { id: string };
             const msgs = await db
-                .select()
+                .select({
+                    id: interviewMessages.id,
+                    applicationId: interviewMessages.applicationId,
+                    senderType: interviewMessages.senderType,
+                    senderId: interviewMessages.senderId,
+                    content: interviewMessages.content,
+                    createdAt: interviewMessages.createdAt,
+                    senderUsername: users.username,
+                })
                 .from(interviewMessages)
+                .leftJoin(users, eq(interviewMessages.senderId, users.id))
                 .where(eq(interviewMessages.applicationId, id))
                 .orderBy(interviewMessages.createdAt);
             return reply.send(msgs);
@@ -421,11 +469,12 @@ export default async function applicationsController(fastify: FastifyInstance) {
                 console.error('❌ IPC err:', err);
             }
 
-            // Emit WS event
-            fastify.io.emit(`interview_message_${id}`, msg);
+            // Emit WS event (include admin username for live display)
+            const msgWithUsername = { ...msg, senderUsername: request.user!.username };
+            fastify.io.emit(`interview_message_${id}`, msgWithUsername);
             fastify.io.emit('applications_refresh');
 
-            return reply.send(msg);
+            return reply.send(msgWithUsername);
         } catch (e) {
             console.error('❌ Ошибка отправки сообщения:', e);
             return reply.status(500).send({ error: 'Internal server error' });

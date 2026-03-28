@@ -175,7 +175,7 @@ export default async function settingsController(fastify: FastifyInstance) {
         const { id } = req.params as { id: string };
         const body = req.body as {
           type?: 'system' | 'access' | 'none';
-          systemType?: 'main' | 'new' | 'tier' | 'blacklist' | null;
+          systemType?: 'main' | 'new' | 'tier' | 'blacklist' | 'interview' | null;
           isAdmin?: boolean;
           canManageSettings?: boolean;
         };
@@ -502,7 +502,7 @@ export default async function settingsController(fastify: FastifyInstance) {
     icon: z.string().nullable().optional(),
     priority: z.number().default(0),
     type: z.enum(['system', 'access', 'none']).default('none'),
-    systemType: z.enum(['main', 'new', 'tier', 'blacklist']).nullable().optional(),
+    systemType: z.enum(['main', 'new', 'tier', 'blacklist', 'interview']).nullable().optional(),
     isAdmin: z.boolean().default(false),
     canManageSettings: z.boolean().default(false),
     isEveryone: z.boolean().default(false),

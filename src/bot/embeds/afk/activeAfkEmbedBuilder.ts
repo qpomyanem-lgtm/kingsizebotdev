@@ -22,7 +22,7 @@ export function buildActiveAfkRawPayload(activeAfks: ActiveAfkRow[]) {
     if (activeAfks.length === 0) {
         entryComponents.push({
             type: 10,
-            content: '*В данный момент нет активных AFK.*'
+            content: '*В данный момент список AFK пуст.*'
         });
     } else {
         for (const afk of activeAfks) {

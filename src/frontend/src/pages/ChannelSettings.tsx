@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, useAuth } from '../lib/api';
-import { Hash, Save, AlertCircle, Loader2, Ticket, Calendar, Moon, Activity, ListChecks } from 'lucide-react';
+import { Hash, Save, AlertCircle, Loader2, Ticket, Calendar, Moon, Activity, ListChecks, ClipboardList } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface SystemSetting {
@@ -19,6 +19,7 @@ export function ChannelSettings() {
   const [afkChannelId, setAfkChannelId] = useState('');
   const [onlineChannelId, setOnlineChannelId] = useState('');
   const [activityForumChannelId, setActivityForumChannelId] = useState('');
+  const [applicationsStatsChannelId, setApplicationsStatsChannelId] = useState('');
 
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
@@ -39,6 +40,7 @@ export function ChannelSettings() {
       setAfkChannelId(systemSettingsData.find(s => s.key === 'AFK_CHANNEL_ID')?.value || '');
       setOnlineChannelId(systemSettingsData.find(s => s.key === 'ONLINE_CHANNEL_ID')?.value || '');
       setActivityForumChannelId(systemSettingsData.find(s => s.key === 'ACTIVITY_FORUM_CHANNEL_ID')?.value || '');
+      setApplicationsStatsChannelId(systemSettingsData.find(s => s.key === 'APPLICATIONS_STATS_CHANNEL_ID')?.value || '');
     }
   }, [systemSettingsData]);
 
@@ -88,6 +90,10 @@ export function ChannelSettings() {
       updates.push({ key: 'ACTIVITY_FORUM_CHANNEL_ID', value: activityForumChannelId || null });
     }
 
+    updates.push(
+      ...getUpdatePayload('APPLICATIONS_STATS_CHANNEL_ID', applicationsStatsChannelId, systemSettingsData, 'APPLICATIONS_STATS_MESSAGE_ID')
+    );
+
     if (updates.length > 0) {
       saveMutation.mutate(updates);
     } else {
@@ -102,7 +108,8 @@ export function ChannelSettings() {
     eventCaptChannelId !== (systemSettingsData?.find(s => s.key === 'EVENT_CAPT_CHANNEL_ID')?.value || '') ||
     afkChannelId !== (systemSettingsData?.find(s => s.key === 'AFK_CHANNEL_ID')?.value || '') ||
     onlineChannelId !== (systemSettingsData?.find(s => s.key === 'ONLINE_CHANNEL_ID')?.value || '') ||
-    activityForumChannelId !== (systemSettingsData?.find(s => s.key === 'ACTIVITY_FORUM_CHANNEL_ID')?.value || '');
+    activityForumChannelId !== (systemSettingsData?.find(s => s.key === 'ACTIVITY_FORUM_CHANNEL_ID')?.value || '') ||
+    applicationsStatsChannelId !== (systemSettingsData?.find(s => s.key === 'APPLICATIONS_STATS_CHANNEL_ID')?.value || '');
 
   if (isAuthLoading || isSettingsLoading) {
     return <div className="text-white">Загрузка...</div>;
@@ -327,6 +334,33 @@ export function ChannelSettings() {
                       type="text"
                       value={activityForumChannelId}
                       onChange={(e) => setActivityForumChannelId(e.target.value)}
+                      placeholder="Пример: 123456789012345678"
+                      className="w-full bg-slate-50/50 border border-slate-200 text-slate-900 text-[13px] rounded-lg pl-8 pr-3 py-2 outline-none transition-all placeholder:text-slate-300 focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 font-mono"
+                    />
+                  </div>
+                </td>
+              </tr>
+
+              {/* Applications Stats */}
+              <tr className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
+                <td className="py-4 px-6 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-500 flex items-center justify-center shrink-0">
+                    <ClipboardList className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-[13px] text-slate-800">Статистика заявок</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">Панель статистики заявок в реальном времени</div>
+                  </div>
+                </td>
+                <td className="py-4 px-6">
+                  <div className="relative max-w-sm">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Hash className="h-3.5 w-3.5 text-slate-400" />
+                    </div>
+                    <input
+                      type="text"
+                      value={applicationsStatsChannelId}
+                      onChange={(e) => setApplicationsStatsChannelId(e.target.value)}
                       placeholder="Пример: 123456789012345678"
                       className="w-full bg-slate-50/50 border border-slate-200 text-slate-900 text-[13px] rounded-lg pl-8 pr-3 py-2 outline-none transition-all placeholder:text-slate-300 focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-500/10 font-mono"
                     />

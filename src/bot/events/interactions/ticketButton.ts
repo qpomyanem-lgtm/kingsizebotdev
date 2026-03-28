@@ -77,17 +77,18 @@ export async function handleTicketApplyBtn(interaction: ButtonInteraction) {
     }
 
     const now = Date.now();
-    const cached = cachedFieldConfigs && cachedFieldConfigs.expiresAt > now ? cachedFieldConfigs.value : null;
-    const configs = cached ?? DEFAULT_FIELD_CONFIGS;
-
-    // Refresh cache in background (best-effort). This won't affect the current modal.
-    if (!cachedFieldConfigs || cachedFieldConfigs.expiresAt <= now) {
-        void withTimeout(getFieldConfigs(), 3000)
-            .then((loaded) => {
-                if (!loaded) return;
-                cachedFieldConfigs = { value: loaded, expiresAt: Date.now() + 30_000 };
-            })
-            .catch(() => {});
+    let configs: FieldConfig[];
+    if (cachedFieldConfigs && cachedFieldConfigs.expiresAt > now) {
+        configs = cachedFieldConfigs.value;
+    } else {
+        // First call or expired — load from DB synchronously (with timeout fallback)
+        const loaded = await withTimeout(getFieldConfigs(), 2000);
+        if (loaded) {
+            cachedFieldConfigs = { value: loaded, expiresAt: Date.now() + 30_000 };
+            configs = loaded;
+        } else {
+            configs = DEFAULT_FIELD_CONFIGS;
+        }
     }
 
     const modal = new ModalBuilder()

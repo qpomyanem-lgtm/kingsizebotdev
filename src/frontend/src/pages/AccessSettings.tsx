@@ -5,7 +5,7 @@ import { api, useAuth } from '../lib/api';
 import { cn } from '../lib/utils';
 
 type RoleType = 'system' | 'access' | 'none';
-type SystemType = 'main' | 'new' | 'tier' | 'blacklist' | null;
+type SystemType = 'main' | 'new' | 'tier' | 'blacklist' | 'interview' | null;
 
 interface Role {
   id: string;
@@ -381,7 +381,7 @@ export function AccessSettings() {
                 >
                   <Shield className="mb-1.5 h-4 w-4 text-amber-600" />
                   <p className="text-[12px] font-semibold text-slate-900">Дискорд роль</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">MAIN / NEW / TIER / ЧС</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">MAIN / NEW / TIER / ЧС / Обзвон</p>
                 </button>
 
                 <button
@@ -420,12 +420,13 @@ export function AccessSettings() {
           {accessDraft.type === 'system' && (
             <div className="rounded-[18px] border border-slate-100 bg-white p-3.5 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
               <p className="mb-2.5 text-[13px] font-bold text-slate-900">Системный тип</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
                 {([
                   { key: 'main', label: 'Основная роль', desc: 'Основная роль члена семьи' },
                   { key: 'new', label: 'Роль новенького', desc: 'Выдаётся при принятии заявки' },
                   { key: 'tier', label: 'Тировая роль', desc: 'Позиция в списках' },
                   { key: 'blacklist', label: 'Чёрный список', desc: 'Выдаётся при ЧС' },
+                  { key: 'interview', label: 'Обзвон', desc: 'Выдаётся при статусе обзвона' },
                 ] as const).map(({ key, label, desc }) => {
                   const taken = takenSystemTypes[key];
                   return (

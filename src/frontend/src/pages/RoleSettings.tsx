@@ -25,7 +25,7 @@ import { api, useAuth } from '../lib/api';
 import { DynamicIcon } from '../components/IconPicker';
 
 type RoleType = 'system' | 'access' | 'none';
-type SystemType = 'main' | 'new' | 'tier' | 'blacklist' | null;
+type SystemType = 'main' | 'new' | 'tier' | 'blacklist' | 'interview' | null;
 
 interface Role {
   id: string;

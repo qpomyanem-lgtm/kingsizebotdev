@@ -270,7 +270,7 @@ export async function hasRoleSettingsAccess(discordUserId: string): Promise<bool
  */
 export async function hasSystemRole(
   discordUserId: string,
-  systemType: 'main' | 'new' | 'tier' | 'blacklist',
+  systemType: 'main' | 'new' | 'tier' | 'blacklist' | 'interview',
 ): Promise<boolean> {
   const [memberRoleIds, systemRows] = await Promise.all([
     getMemberRoleIds(discordUserId),

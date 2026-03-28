@@ -229,7 +229,7 @@ async function startBot() {
                                         components: [
                                             {
                                                 type: 10,
-                                                content: `### <:accept:1486758313252098300> **ЗАЯВКА ПРИНЯТА**\n\n***Поздравляем, ${app.discordUsername}!***\n***Добро пожаловать в KINGSIZE LEGENDARY!***\n***Твой никнейм на сервере изменен на: ${newNickname}***\n***Выдана роль: ${roleName}***`
+                                                content: `### <:accept:1486758313252098300> **ЗАЯВКА ПРИНЯТА**\n\n**Поздравляем, ${app.discordUsername}!**\n**Добро пожаловать в KINGSIZE LEGENDARY!**\n**Твой никнейм на сервере изменен на: ${newNickname}**\n**Выдана роль: ${roleName}**\n**Приятной игры!**`
                                             }
                                         ]
                                     }

@@ -15,6 +15,7 @@ import { handleEventCreateBtn, handleEventCreateModalSubmit, handleEventActionBt
 import { handleInterviewReadyBtn } from '../events/interactions/interviewReady.js';
 import { createActivityThreadIpc, handleActivityForumMessage, handleActivityUploadBtn, handleActivityModalSubmit, handleActivityReaction, rebuildActivityFromForum, closeActivityThread, isActivityExpired } from '../events/interactions/activityInteractions.js';
 import { checkAndDeployEmbeds } from '../lib/embedDeployer.js';
+import { refreshApplicationsStatsEmbed } from '../lib/applicationsStatsRefresh.js';
 import { systemSettings } from '../../db/schema';
 
 const IPC_BACKEND_BASE_URL = process.env.IPC_BACKEND_BASE_URL || 'http://localhost:3000';
@@ -52,6 +53,13 @@ export async function loadEvents(client: Client) {
             if (shouldSkipBgJobs()) return;
             checkExpiredAfks(c).catch(console.error);
         }, 60_000);
+
+        // Start Applications Stats refresh interval (every 30 seconds)
+        setInterval(() => {
+            if (bgJobsDisabled) return;
+            if (shouldSkipBgJobs()) return;
+            refreshApplicationsStatsEmbed(c).catch(console.error);
+        }, 30_000);
 
         // Start Majestic API Online check interval (every 30 seconds)
         setInterval(() => {
@@ -200,7 +208,7 @@ export async function loadEvents(client: Client) {
             const isOurBotMessage = Boolean(message.author?.bot) || (botUserId ? messageAuthorId === botUserId : false);
             if (!isOurBotMessage) return;
             
-            const managedKeys = ['TICKETS_MESSAGE_ID', 'AFK_MESSAGE_ID', 'EVENTS_MESSAGE_ID', 'ONLINE_MESSAGE_ID'];
+            const managedKeys = ['TICKETS_MESSAGE_ID', 'AFK_MESSAGE_ID', 'EVENTS_MESSAGE_ID', 'ONLINE_MESSAGE_ID', 'APPLICATIONS_STATS_MESSAGE_ID'];
             
             // Look up if this deleted message was one of our system settings
             const settings = await db.select().from(systemSettings);

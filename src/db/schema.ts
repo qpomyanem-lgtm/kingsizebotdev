@@ -29,7 +29,7 @@ export const roles = pgTable('roles', {
   icon: text('icon'),
   priority: integer('priority').notNull().default(0),
   type: text('type', { enum: ['system', 'access', 'none'] }).notNull().default('none'),
-  systemType: text('system_type', { enum: ['main', 'new', 'tier', 'blacklist'] }),
+  systemType: text('system_type', { enum: ['main', 'new', 'tier', 'blacklist', 'interview'] }),
   isAdmin: boolean('is_admin').default(false).notNull(),
   canManageSettings: boolean('can_manage_settings').default(false).notNull(),
   isEveryone: boolean('is_everyone').default(false).notNull(),

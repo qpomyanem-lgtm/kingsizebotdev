@@ -134,10 +134,11 @@ export async function getRoleIdByKey(key: string): Promise<string | null> {
  * Purpose values: 'family', 'newbie', 'tier_1', 'tier_2', 'tier_3', 'blacklist'
  */
 export async function getRoleIdByPurpose(purpose: string): Promise<string | null> {
-    const purposeMap: Record<string, 'main' | 'new' | 'blacklist'> = {
+    const purposeMap: Record<string, 'main' | 'new' | 'blacklist' | 'interview'> = {
         family: 'main',
         newbie: 'new',
         blacklist: 'blacklist',
+        interview: 'interview',
     };
 
     if (purpose === 'tier_1') return getTierRoleDiscordIdByIndex(0);
@@ -152,7 +153,7 @@ export async function getRoleIdByPurpose(purpose: string): Promise<string | null
 /**
  * Primary lookup for system Discord role IDs in unified `roles` table.
  */
-export async function getDiscordRoleIdBySystemType(systemType: 'main' | 'new' | 'blacklist'): Promise<string | null> {
+export async function getDiscordRoleIdBySystemType(systemType: 'main' | 'new' | 'blacklist' | 'interview'): Promise<string | null> {
     const [row] = await db
         .select()
         .from(roles)

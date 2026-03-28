@@ -9,6 +9,8 @@ import { buildEventsPanelComponents } from '../embeds/panels/eventsPanel.js';
 import { buildOnlineStatusPanelComponents } from '../embeds/panels/onlineStatusPanel.js';
 import { buildActiveAfkRawPayload } from '../embeds/afk/activeAfkEmbedBuilder.js';
 import { buildAfkPanelPayload } from '../embeds/panels/afkPanels.js';
+import { buildApplicationsStatsPanelPayload } from '../embeds/panels/applicationsStatsPanel.js';
+import { refreshApplicationsStatsEmbed } from './applicationsStatsRefresh.js';
 
 let isDeployingEmbeds = false;
 
@@ -55,6 +57,17 @@ export async function checkAndDeployEmbeds(client: Client) {
             buildPayload: async () => {
                 // AFK needs 2 consecutive messages — handled as special case in deployEmbed
                 return { components: [], flags: MessageFlags.IsComponentsV2 };
+            }
+        },
+        {
+            channelKey: 'APPLICATIONS_STATS_CHANNEL_ID',
+            messageKey: 'APPLICATIONS_STATS_MESSAGE_ID',
+            buildPayload: async () => {
+                const stats = { total: 0, pending: 0, interview: 0, interviewReady: 0, unreadMessages: 0 };
+                return buildApplicationsStatsPanelPayload(stats);
+            },
+            onCreated: async (c) => {
+                await refreshApplicationsStatsEmbed(c);
             }
         }
     ];
