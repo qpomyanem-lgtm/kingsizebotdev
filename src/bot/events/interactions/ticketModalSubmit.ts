@@ -1,6 +1,6 @@
 import { ModalSubmitInteraction, EmbedBuilder, Colors } from 'discord.js';
 import { db } from '../../../db';
-import { applications, members } from '../../../db/schema';
+import { applications, members, systemSettings } from '../../../db/schema';
 import { v4 as uuidv4 } from 'uuid';
 import { eq } from 'drizzle-orm';
 
@@ -8,6 +8,20 @@ export async function handleTicketApplyModal(interaction: ModalSubmitInteraction
     // Acknowledge immediately without creating an ephemeral message.
     await interaction.deferUpdate().catch(() => {});
     const discordId = interaction.user.id;
+
+    // Check if applications are open (deferred from button handler to avoid interaction timeout)
+    try {
+        const [appOpenRow] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'APPLICATIONS_OPEN'));
+        if (appOpenRow?.value !== 'true') {
+            await interaction.followUp({
+                content: '❌ Заявки сейчас закрыты.',
+                ephemeral: true,
+            });
+            return;
+        }
+    } catch {
+        // If DB check fails, allow through as fallback
+    }
 
     // Check if user is blacklisted
     try {

@@ -4,47 +4,9 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '../../../../db';
 import { activityScreenshots, activityThreads, members } from '../../../../db/schema';
 import { countMemberScreenshots, isActivityExpired, triggerSiteRefresh, updateThreadMessage, closeActivityThread, MAX_SCREENSHOTS } from './activityShared';
-
 export async function handleActivityUploadBtn(interaction: ButtonInteraction) {
-    const memberId = interaction.customId.replace('activity_upload_', '');
-    if (!memberId) return;
-
-    // Check if activity is still active
-    const [threadRow] = await db.select().from(activityThreads).where(eq(activityThreads.memberId, memberId)).limit(1);
-    if (!threadRow || threadRow.status === 'completed') {
-        await interaction.reply({ content: '❌ Активность уже завершена.', ephemeral: true }).catch(() => null);
-        return;
-    }
-
-    // Check limits
-    const currentCount = await countMemberScreenshots(memberId);
-    if (currentCount >= MAX_SCREENSHOTS) {
-        await interaction.reply({ content: '❌ Достигнут лимит скриншотов.', ephemeral: true }).catch(() => null);
-        return;
-    }
-
-    if (isActivityExpired(threadRow.createdAt)) {
-        await interaction.reply({ content: '❌ Время отправки скриншотов истекло (7 дней).', ephemeral: true }).catch(() => null);
-        return;
-    }
-
-    // Open modal with file upload
-    const fileUpload = new FileUploadBuilder()
-        .setCustomId('activity_file_upload')
-        .setRequired(true)
-        .setMaxValues(10);
-
-    const label = new LabelBuilder()
-        .setLabel('Прикрепите скриншоты активности')
-        .setDescription('Можно загрузить до 10 файлов за раз')
-        .setFileUploadComponent(fileUpload);
-
-    const modal = new ModalBuilder()
-        .setCustomId(`activity_modal_${memberId}`)
-        .setTitle('📎 Загрузка скриншотов')
-        .addComponents(label);
-
-    await interaction.showModal(modal);
+    // Modal already shown via raw WebSocket handler — nothing else to do.
+    // Validation checks are in the modal submit handler.
 }
 
 export async function handleActivityModalSubmit(client: Client, interaction: ModalSubmitInteraction, rawData?: { resolved: any; components: any[] }) {
@@ -53,9 +15,21 @@ export async function handleActivityModalSubmit(client: Client, interaction: Mod
 
     await interaction.deferReply({ ephemeral: true });
 
+    // Validation checks (deferred from button handler to avoid interaction timeout)
     const [threadRow] = await db.select().from(activityThreads).where(eq(activityThreads.memberId, memberId)).limit(1);
     if (!threadRow || threadRow.status === 'completed') {
         await interaction.editReply({ content: '❌ Активность уже завершена.' }).catch(() => null);
+        return;
+    }
+
+    const preCheckCount = await countMemberScreenshots(memberId);
+    if (preCheckCount >= MAX_SCREENSHOTS) {
+        await interaction.editReply({ content: '❌ Достигнут лимит скриншотов.' }).catch(() => null);
+        return;
+    }
+
+    if (isActivityExpired(threadRow.createdAt)) {
+        await interaction.editReply({ content: '❌ Время отправки скриншотов истекло (7 дней).' }).catch(() => null);
         return;
     }
 

@@ -17,6 +17,8 @@ import { createActivityThreadIpc, handleActivityForumMessage, handleActivityUplo
 import { checkAndDeployEmbeds } from '../lib/embedDeployer.js';
 import { refreshApplicationsStatsEmbed } from '../lib/applicationsStatsRefresh.js';
 import { systemSettings } from '../../db/schema';
+import { buildTicketModalData } from '../events/interactions/ticketButton.js';
+import { warmupDiscordConnection, startConnectionKeepAlive } from '../lib/interactionResponses.js';
 
 const IPC_BACKEND_BASE_URL = process.env.IPC_BACKEND_BASE_URL || 'http://localhost:3000';
 const IPC_BOT_BASE_URL = process.env.IPC_BOT_BASE_URL || 'http://localhost:3001';
@@ -28,6 +30,11 @@ export async function loadEvents(client: Client) {
 
     client.once(Events.ClientReady, async (c) => {
         console.log(`✅ Успешно! Бот авторизован как ${c.user.tag}`);
+
+        // Pre-warm HTTP connection pool to Discord API
+        await warmupDiscordConnection();
+        // Keep connection pool warm with periodic pings
+        startConnectionKeepAlive();
 
         // Prevent heavy background jobs from stacking up and delaying interaction handlers.
         let isReconcilingActivityForums = false;
@@ -648,19 +655,31 @@ export async function loadEvents(client: Client) {
 
     // Cache raw modal data because discord.js doesn't expose resolved attachments on ModalSubmitInteraction
     const activityModalRawCache = new Map<string, { resolved: any; components: any[] }>();
-    client.on('raw', (packet: any) => {
-        if (packet.t === 'INTERACTION_CREATE' && packet.d?.type === 5 && packet.d?.data?.custom_id?.startsWith('activity_modal_')) {
-            const data = packet.d.data;
+
+    client.on('raw', async (packet: any) => {
+        if (packet.t !== 'INTERACTION_CREATE') return;
+        const d = packet.d;
+
+        // Cache activity modal raw data
+        if (d.type === 5 && d.data?.custom_id?.startsWith('activity_modal_')) {
+            const data = d.data;
             activityModalRawCache.set(data.custom_id, {
                 resolved: data.resolved ?? {},
                 components: data.components ?? [],
             });
-            // Auto-clean after 60s
             setTimeout(() => activityModalRawCache.delete(data.custom_id), 60_000);
+        }
+
+        // Pause bg jobs immediately when any interaction arrives
+        if (d.type === 3) {
+            (globalThis as any).__discordBgSkipUntil = Date.now() + 5_000;
         }
     });
 
     client.on('interactionCreate', async (interaction) => {
+        // Pause background jobs for 5 seconds to keep event loop responsive
+        (globalThis as any).__discordBgSkipUntil = Date.now() + 5_000;
+
         // Guild lock: ignore interactions from unauthorized servers
         const allowed = (client as any)._allowedGuildId;
         // Allow DMs (interaction.guildId is null) so DM buttons can be handled.
@@ -681,19 +700,82 @@ export async function loadEvents(client: Client) {
                 }
             }
         } else if (interaction.isButton()) {
-            if (interaction.customId === 'ticket_apply_btn') {
+            const customId = interaction.customId;
+
+            // ── Respond IMMEDIATELY using discord.js REST (warm HTTP/2 connection) ──
+            try {
+                if (customId === 'ticket_apply_btn') {
+                    await interaction.showModal(buildTicketModalData() as any);
+                } else if (customId === 'afk_start_btn') {
+                    await interaction.showModal({
+                        title: 'Начать АФК',
+                        custom_id: 'afk_start_modal',
+                        components: [
+                            { type: 1, components: [{ type: 4, custom_id: 'afk_time', label: 'Окончание (добавьте ЧЧ:ММ по МСК)', placeholder: 'Например: Завтра до 14:30', style: 1, max_length: 100, required: true }] },
+                            { type: 1, components: [{ type: 4, custom_id: 'afk_reason', label: 'Причина', style: 2, required: true }] },
+                        ],
+                    });
+                } else if (customId === 'event_create_btn') {
+                    await interaction.showModal({
+                        title: 'Создание списка на Капт',
+                        custom_id: 'event_create_modal',
+                        components: [
+                            { type: 1, components: [{ type: 4, custom_id: 'slotsInput', label: 'Количество слотов:', style: 1, required: true }] },
+                            { type: 1, components: [{ type: 4, custom_id: 'timeInput', label: 'Время проведения(МСК):', style: 1, required: true }] },
+                        ],
+                    });
+                } else if (customId.startsWith('activity_upload_')) {
+                    const memberId = customId.replace('activity_upload_', '');
+                    await interaction.showModal({
+                        title: '📎 Загрузка скриншотов',
+                        custom_id: `activity_modal_${memberId}`,
+                        components: [
+                            {
+                                type: 18,
+                                label: 'Прикрепите скриншоты активности',
+                                description: 'Можно загрузить до 10 файлов за раз',
+                                component: {
+                                    type: 19,
+                                    custom_id: 'activity_file_upload',
+                                    required: true,
+                                    max_values: 10,
+                                },
+                            },
+                        ],
+                    });
+                } else if (
+                    customId === 'afk_end_btn' ||
+                    customId.startsWith('interview_ready_') ||
+                    customId.startsWith('event_join_') ||
+                    customId.startsWith('event_leave_') ||
+                    customId.startsWith('event_close_') ||
+                    customId.startsWith('event_manage_') ||
+                    customId.startsWith('event_logs_')
+                ) {
+                    await interaction.deferUpdate();
+                }
+            } catch (e: any) {
+                // Log but don't crash — some buttons (event_setgroup, event_selectmap, etc.)
+                // are handled by their own handlers below
+                if (e.code !== 'InteractionAlreadyReplied') {
+                    console.error(`❌ Button response error [${customId}]:`, e.message);
+                }
+            }
+
+            // Run handler logic (post-response work)
+            if (customId === 'ticket_apply_btn') {
                 await handleTicketApplyBtn(interaction).catch(console.error);
-            } else if (interaction.customId === 'afk_start_btn') {
+            } else if (customId === 'afk_start_btn') {
                 await handleAfkStartBtn(interaction).catch(console.error);
-            } else if (interaction.customId === 'afk_end_btn') {
+            } else if (customId === 'afk_end_btn') {
                 await handleAfkEndBtn(interaction).catch(console.error);
-            } else if (interaction.customId === 'event_create_btn') {
+            } else if (customId === 'event_create_btn') {
                 await handleEventCreateBtn(interaction).catch(console.error);
-            } else if (interaction.customId.startsWith('event_')) {
+            } else if (customId.startsWith('event_')) {
                 await handleEventActionBtn(interaction).catch(console.error);
-            } else if (interaction.customId.startsWith('activity_upload_')) {
+            } else if (customId.startsWith('activity_upload_')) {
                 await handleActivityUploadBtn(interaction).catch(console.error);
-            } else if (interaction.customId.startsWith('interview_ready_')) {
+            } else if (customId.startsWith('interview_ready_')) {
                 await handleInterviewReadyBtn(interaction).catch(console.error);
             }
         } else if (interaction.isModalSubmit()) {

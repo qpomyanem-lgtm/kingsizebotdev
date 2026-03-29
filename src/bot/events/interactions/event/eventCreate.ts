@@ -14,51 +14,12 @@ import { eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { canCreateEvents, EVENT_TYPE_LABELS } from './eventShared';
 import { refreshEventEmbed } from './eventEmbedPayload.js';
-import { showModalViaInteractionCallback } from '../../../lib/interactionResponses';
 
 // ── 1. Create Button → Show Modal with raw Radio Group ─────────
 
 export async function handleEventCreateBtn(interaction: ButtonInteraction) {
-    const allowed = await canCreateEvents(interaction.member as GuildMember | null, interaction.user.id);
-    if (!allowed) {
-        await interaction.reply({ content: 'У вас нет прав для создания списков.', ephemeral: true });
-        return;
-    }
-
-    // Modal with two TextInputs
-    const rawModal = {
-        title: 'Создание списка на Капт',
-        custom_id: 'event_create_modal',
-        components: [
-            {
-                type: 1,
-                components: [
-                    {
-                        type: 4,
-                        custom_id: 'slotsInput',
-                        label: 'Количество слотов:',
-                        style: 1,
-                        required: true,
-                    },
-                ],
-            },
-            {
-                type: 1, // ActionRow
-                components: [
-                    {
-                        type: 4, // TextInput
-                        custom_id: 'timeInput',
-                        label: 'Время проведения(МСК):',
-                        style: 1, // Short
-                        required: true,
-                    },
-                ],
-            },
-        ],
-    };
-
-    // @ts-ignore — raw API call for RadioGroup support
-    await showModalViaInteractionCallback(interaction, rawModal as any);
+    // Modal already shown via raw WebSocket handler — nothing else to do.
+    // Permission check is in the modal submit handler.
 }
 
 // ── 2. Create Modal Submit → Insert Event ────────────────────────
@@ -66,6 +27,13 @@ export async function handleEventCreateBtn(interaction: ButtonInteraction) {
 export async function handleEventCreateModalSubmit(interaction: ModalSubmitInteraction) {
     // Acknowledge immediately to gracefully close the modal silently.
     await interaction.deferUpdate().catch(() => {});
+
+    // Permission check (deferred from button handler to avoid interaction timeout)
+    const allowed = await canCreateEvents(interaction.member as GuildMember | null, interaction.user.id);
+    if (!allowed) {
+        await interaction.followUp({ content: 'У вас нет прав для создания списков.', ephemeral: true });
+        return;
+    }
 
     const eventType = 'Capt';
 

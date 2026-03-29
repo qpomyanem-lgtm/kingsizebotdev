@@ -13,7 +13,6 @@ import { events, eventParticipants, members, eventMaps, eventLogs, systemSetting
 import { eq, and, asc } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { refreshEventEmbed } from './eventEmbedPayload.js';
-import { showModalViaInteractionCallback } from '../../../lib/interactionResponses';
 import { EVENT_TYPE_LABELS, toUnixTs } from './eventShared';
 
 export async function handleEventActionBtn(interaction: ButtonInteraction) {
@@ -25,10 +24,8 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
     const eventId = parts.slice(2).join('_');
 
     const isModalAction = action === 'selectmap' || action === 'setgroup' || action === 'removepick' || action === 'setvoice';
-    // For non-modal actions we must ACK quickly to avoid Discord 10062 "Unknown interaction".
-    if (!isModalAction) {
-        await interaction.deferUpdate().catch(() => {});
-    }
+    // For non-modal actions, deferUpdate is already sent by the raw WS handler.
+    // For modal actions, we need to show the modal here (they need DB data first).
 
     const sendEphemeral = async (payload: any) => {
         if (isModalAction) {
@@ -139,7 +136,8 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
         };
 
         // @ts-ignore — raw API
-        await showModalViaInteractionCallback(interaction, rawModal as any);
+        // @ts-ignore — raw object modal
+        await interaction.showModal(rawModal as any);
         return;
     }
 
@@ -248,7 +246,7 @@ export async function handleEventActionBtn(interaction: ButtonInteraction) {
             .setRequired(true);
 
         modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(groupInput));
-        await showModalViaInteractionCallback(interaction, modal);
+        await interaction.showModal(modal);
         return;
     }
 

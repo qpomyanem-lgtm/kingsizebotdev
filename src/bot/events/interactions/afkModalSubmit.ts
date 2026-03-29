@@ -1,12 +1,35 @@
 import { ModalSubmitInteraction } from 'discord.js';
 import { db } from '../../../db';
 import { afkEntries } from '../../../db/schema';
+import { eq, and } from 'drizzle-orm';
 import { refreshAfkEmbed } from '../../lib/afkEmbed';
 import { v4 as uuid } from 'uuid';
+import { hasPermission, hasSystemRole } from '../../../backend/lib/discordRoles';
 
 export async function handleAfkModalSubmit(interaction: ModalSubmitInteraction) {
     // Acknowledge immediately to gracefully close the modal silently.
     await interaction.deferUpdate().catch(() => {});
+
+    // Permission check (deferred from button handler to avoid interaction timeout)
+    const allowed = await hasPermission(interaction.user.id, 'bot:afk:start') ||
+                    await hasSystemRole(interaction.user.id, 'main') ||
+                    await hasSystemRole(interaction.user.id, 'new');
+    if (!allowed) {
+        return interaction.followUp({ content: 'У вас нет доступа к системе АФК.', ephemeral: true });
+    }
+
+    // Check if user already has an active AFK
+    const existing = await db.select().from(afkEntries)
+        .where(
+            and(
+                eq(afkEntries.discordId, interaction.user.id),
+                eq(afkEntries.status, 'active')
+            )
+        );
+    if (existing.length > 0) {
+        return interaction.followUp({ content: 'У вас уже есть активный АФК. Сначала завершите его.', ephemeral: true });
+    }
+
     const timeStr = interaction.fields.getTextInputValue('afk_time').trim();
     const reason = interaction.fields.getTextInputValue('afk_reason').trim();
 

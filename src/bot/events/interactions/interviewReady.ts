@@ -2,16 +2,13 @@ import { ButtonInteraction, EmbedBuilder, Colors } from 'discord.js';
 import { db } from '../../../db';
 import { applications } from '../../../db/schema';
 import { eq } from 'drizzle-orm';
-
 const IPC_BACKEND_BASE_URL = process.env.IPC_BACKEND_BASE_URL || 'http://localhost:3000';
 
 export async function handleInterviewReadyBtn(interaction: ButtonInteraction) {
     const applicationId = interaction.customId.replace('interview_ready_', '');
 
     try {
-        // Acknowledge the interaction immediately to prevent "This interaction failed".
-        // Then we can safely do DB/network work.
-        await interaction.deferUpdate();
+        // deferUpdate already sent via raw WebSocket handler.
 
         const [app] = await db.select().from(applications).where(eq(applications.id, applicationId));
 
